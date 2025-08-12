@@ -1,10 +1,16 @@
+"""Base definitions for EMG and IMU devices."""
+
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
-from typing import Callable, List,Optional,Type,Tuple
+from typing import Callable, List, Optional, Type
+
 import pandas as pd
 import serial.tools.list_ports as portList
+
 EMGCallback = Callable[[pd.DataFrame], None]
-IMUCallback = Callable[[pd.DataFrame], None]        
+IMUCallback = Callable[[pd.DataFrame], None]
+
 
 class Device(ABC):
     """Common interface for any EMG+IMU device."""
@@ -19,10 +25,13 @@ class Device(ABC):
     # ---- lifecycle ----
     @abstractmethod
     def connect(self, **kwargs) -> None: ...
+
     @abstractmethod
     def start(self) -> None: ...
+
     @abstractmethod
     def stop(self) -> None: ...
+
     @abstractmethod
     def disconnect(self) -> None: ...
 
@@ -36,26 +45,28 @@ class Device(ABC):
             return pd.DataFrame()
         if not emg_df.empty and not imu_df.empty:
             df_all = pd.merge(
-                emg_df, imu_df,
+                emg_df,
+                imu_df,
                 left_index=True,
                 right_index=True,
-                how="outer"  # keep all times from both
+                how="outer",  # keep all times from both
             ).sort_index()
             df_all = df_all.infer_objects(copy=False)
             df_all = df_all.interpolate(method="linear")
             df_all = df_all.ffill()
             df_all.dropna()  # drop any remaining NaNs
-         
+
             # outer join on Timestamp index; sort for sanity
             return df_all
         if emg_df.empty:
             return imu_df
         if imu_df.empty:
             return emg_df
-    
+
     @abstractmethod
     def get_emg_df(self) -> pd.DataFrame:
         return pd.DataFrame()
+
     @abstractmethod
     def get_imu_df(self) -> pd.DataFrame:
         return pd.DataFrame()
@@ -74,39 +85,45 @@ class Device(ABC):
     # Helpers for subclasses to notify subscribers
     def _emit_emg(self, df_chunk: pd.DataFrame) -> None:
         for fn in list(self._emg_subs):
-            try: fn(df_chunk)
-            except Exception: pass
+            try:
+                fn(df_chunk)
+            except Exception:
+                pass
 
     def _emit_imu(self, df_chunk: pd.DataFrame) -> None:
         for fn in list(self._imu_subs):
-            try: fn(df_chunk)
-            except Exception: pass
-            
+            try:
+                fn(df_chunk)
+            except Exception:
+                pass
+
     def list_serial_devices(self):
-        """Lista puertos serial tal como hace onScanButtonClicked (pero sin GUI)."""
+        """List serial ports similarly to the GUI's scan button."""
         ports = list(portList.comports())
         devices = []
         for p in ports:
             print(p.device, p.name, p.description)
-            devices.append({
-                "device": p.device,
-                "name": p.name,
-                "description": p.description,
-                "manufacturer": getattr(p, "manufacturer", None),
-                "vid": getattr(p, "vid", None),
-                "pid": getattr(p, "pid", None),
-                "serial_number": getattr(p, "serial_number", None),
-            })
+            devices.append(
+                {
+                    "device": p.device,
+                    "name": p.name,
+                    "description": p.description,
+                    "manufacturer": getattr(p, "manufacturer", None),
+                    "vid": getattr(p, "vid", None),
+                    "pid": getattr(p, "pid", None),
+                    "serial_number": getattr(p, "serial_number", None),
+                }
+            )
         return devices
-            
-     # ----- context manager for auto-cleanup -----
+
+    # ----- context manager for auto-cleanup -----
     def __enter__(self) -> "Device":
         # let the caller decide when to connect/start
         return self
 
-    def __exit__(self, exc_type: Optional[Type[BaseException]],
-                       exc: Optional[BaseException],
-                       tb) -> bool:
+    def __exit__(
+        self, exc_type: Optional[Type[BaseException]], exc: Optional[BaseException], tb
+    ) -> bool:
         # ALWAYS attempt to stop & disconnect, even if start/connect failed
         try:
             self.stop()

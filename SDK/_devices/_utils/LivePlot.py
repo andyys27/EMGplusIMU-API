@@ -1,10 +1,12 @@
-# live_plot_qt6_dynamic.py
+"""Utility for displaying live plots using PyQt6 and pyqtgraph."""
+
 import sys
 from typing import Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
 from PyQt6 import QtWidgets, QtCore
+
 
 class LivePlot:
     """
@@ -24,6 +26,7 @@ class LivePlot:
         )
         plotter.start()
     """
+
     def __init__(
         self,
         plots: List[Dict],
@@ -75,6 +78,7 @@ class LivePlot:
             except Exception:
                 pass
             evt.accept()
+
         self.win.closeEvent = _on_close
 
         # QTimer without widget parent (avoids PyQt6 type error)

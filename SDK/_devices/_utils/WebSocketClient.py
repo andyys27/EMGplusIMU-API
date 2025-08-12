@@ -1,12 +1,15 @@
-# pip install websocket-client
+"""Minimal WebSocket client with callback support."""
+
 import threading
 from typing import Callable, List, Optional, Union
-import websocket 
+import websocket
 
 Message = Union[str, bytes]
 
+
 class WebSocketClient:
     """Minimal, Qt-free WebSocket client with callbacks and a background thread."""
+
     def __init__(self, url: str):
         self.url = url
         self._callbacks: List[Callable[[Message], None]] = []
@@ -19,10 +22,9 @@ class WebSocketClient:
         """Register a function that receives each incoming message (text or bytes)."""
         if callable(fn) and fn not in self._callbacks:
             self._callbacks.append(fn)
-            
+
     def desubscribe(self) -> None:
         self._callbacks: List[Callable[[Message], None]] = []
-
 
     def connect(self) -> None:
         """Start the background receiver (non-blocking)."""
@@ -48,11 +50,12 @@ class WebSocketClient:
                     print(f"[WebSocketClient] run_forever error: {e}")
                 if not self._stop.is_set():
                     # small backoff before retry
-                    import time; time.sleep(2)
+                    import time
+
+                    time.sleep(2)
 
         self._th = threading.Thread(target=_runner, daemon=True)
         self._th.start()
-
 
     def disconnect(self) -> None:
         if self._th and self._th.is_alive():
@@ -60,7 +63,6 @@ class WebSocketClient:
         self._th = None
         self._app = None
         print("[WebSocketClient] closed")
-
 
     def send(self, data: Message) -> None:
         """Send text (str) or binary (bytes/bytearray) to the server."""

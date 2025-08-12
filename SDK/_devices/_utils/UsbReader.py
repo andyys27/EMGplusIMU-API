@@ -1,6 +1,9 @@
+"""Threaded USB packet reader used by MioTracker devices."""
+
 from __future__ import annotations
 import threading, time
 from typing import Callable, List, Optional
+
 
 class UsbReader(threading.Thread):
     """
@@ -8,6 +11,7 @@ class UsbReader(threading.Thread):
       Sync1 (0xA5) -> Sync2 (0x5A) -> Type (u8) -> Size (u8) -> Payload (size-4 bytes)
     Delivers packets as (ptype: int, payload: bytes).
     """
+
     def __init__(self, ser, sCoder, debug: bool = False):
         super().__init__(daemon=True)
         self.ser = ser
@@ -83,7 +87,9 @@ class UsbReader(threading.Thread):
                         self.rxstate = "Size"
 
                     elif self.rxstate == "Size":
-                        size = self.sCoder.read_u08(self.ser)  # 1-byte size per your GUI
+                        size = self.sCoder.read_u08(
+                            self.ser
+                        )  # 1-byte size per your GUI
                         if size < 4:
                             # invalid header; resync
                             self.rxstate = "Sync1"
@@ -106,8 +112,7 @@ class UsbReader(threading.Thread):
                     if self.debug:
                         print(f"[USB] loop error: {e!r}")
                     raise ValueError(f"[USB] USB reader error: {e!r}")
-                    
-                        
+
                     # keep silent like GUI
                     pass
         finally:
