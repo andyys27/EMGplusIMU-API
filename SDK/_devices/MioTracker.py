@@ -5,15 +5,15 @@ import pandas as pd
 import threading
 import serial
 import time
-from _utils.WebSocketClient import WebSocketClient
-from _utils.UsbReader import UsbReader
-from _utils.serialCoder import SerialCoder
-from _utils.LivePlot import LivePlot
+from ._utils.WebSocketClient import WebSocketClient
+from ._utils.UsbReader import UsbReader
+from ._utils.serialCoder import SerialCoder
+from  ._utils.LivePlot import LivePlot
 from collections import deque
 import struct
 import datetime
 import numpy as np
-from Device import Device as BaseDevice
+from .Device import Device as BaseDevice
 from datetime import timedelta
 
 
@@ -162,6 +162,7 @@ class MioTracker(BaseDevice):
     def get_emg_df(self, onlyraw=False) -> pd.DataFrame:
         with self._lock:
             if len(self.emgData) == 0:
+                print("No data received")
                 return pd.DataFrame()
 
         rows, ts = [], []
@@ -285,7 +286,6 @@ class MioTracker(BaseDevice):
                     off += 4
                     pkt.append(val)
             with self._lock:
-                self.emgData.append(pkt)
                 if not hasattr(self, "_ema"):
                     self._ema = _OnlineEMGOffsetComp(
                         n_channels=1, Fs=self.Fs, tau_ms=300
@@ -294,8 +294,8 @@ class MioTracker(BaseDevice):
                 corr = self._ema.update(pkt)  # aplica EMA por muestra
 
                 self.emgTime.append(datetime.datetime.now())
-                self.emgData.append(pkt.tolist())
-                self.emgRawData.append(corr.tolist())
+                self.emgData.append(corr.tolist())
+                self.emgRawData.append(pkt.tolist())
         except Exception as e:
             print(f"[USB] EMG payload error: {e}")
             pass
@@ -317,20 +317,25 @@ class MioTracker(BaseDevice):
             pass
 
 
+
 if __name__ == "__main__":
+
     try:
-        dev = MioTracker(
-            transport="websocket", websocketuri="ws://miotracker.local/start"
-        )
-        dev = MioTracker(transport="serial", port="COM6", Fs=1000)
+        # Crear dispositivo
+        #dev = MioTracker(transport="serial", port="COM7", Fs=1000)
+        dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
+
         dev.list_serial_devices()
+        # dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
+
         dev.connect()
         dev.start()
+
+        # Graficar en vivo
         plotter = LivePlot(
             plots=[
                 {"get_df": lambda: dev.get_emg_df(onlyraw=True), "title": "EMG"},
-                {"get_df": lambda: dev.get_imu_df(), "title": "IMU Acceleration"},
-                {"get_df": lambda: dev.get_all_data(), "title": "IMU Acceleration"},
+                {"get_df": lambda: dev.get_imu_df(), "title": "IMU"},
             ],
             window_sec=3,
             refresh_hz=30,
@@ -340,7 +345,14 @@ if __name__ == "__main__":
 
     except Exception as e:
         print(f"Error connecting MioTracker: {e}")
+        try:
+            dev.stop()
+            dev.disconnect()
+        except Exception as e:
+            print(f"Error stopping/disconnecting MioTracker: {e}")
 
     df_all = dev.get_all_data()
-    dev.stop()
-    dev.disconnect()
+    if not df_all.empty:
+        out = f"miotracker_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        df_all.to_csv(out, index=True)
+        print(f"Guardado: {out}")

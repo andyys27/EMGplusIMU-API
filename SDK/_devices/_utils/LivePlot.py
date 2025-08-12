@@ -1,16 +1,16 @@
-"""Utility for displaying live plots using PyQt6 and pyqtgraph."""
+"""Utility for displaying live plots using PyQt5 and pyqtgraph."""
 
 import sys
 from typing import Callable, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import pyqtgraph as pg
-from PyQt6 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore
 
 
 class LivePlot:
     """
-    Multi-subplot live plotter (PyQt6 + pyqtgraph) with DYNAMIC columns.
+    Multi-subplot live plotter (PyQt5 + pyqtgraph) with DYNAMIC columns.
     Each subplot receives a get_df() -> pd.DataFrame with a DatetimeIndex.
     All numeric columns present at each refresh are plotted automatically.
 
@@ -81,7 +81,7 @@ class LivePlot:
 
         self.win.closeEvent = _on_close
 
-        # QTimer without widget parent (avoids PyQt6 type error)
+        # QTimer without widget parent (robusto en PyQt5 también)
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self._update_once)
         self.timer.start(self.refresh_ms)
@@ -129,7 +129,7 @@ class LivePlot:
                 continue
 
             # Convert potential object dtypes to numeric where possible
-            df = df.infer_objects(copy=False)
+            #df = df.infer_objects(copy=False)
             df_num = df.select_dtypes(include=[np.number])
             if df_num.empty:
                 continue
@@ -165,4 +165,4 @@ class LivePlot:
     def start(self):
         self.win.show()
         if self._app_created:
-            self.app.exec()
+            self.app.exec_()

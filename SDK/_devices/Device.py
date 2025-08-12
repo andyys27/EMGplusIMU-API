@@ -51,7 +51,7 @@ class Device(ABC):
                 right_index=True,
                 how="outer",  # keep all times from both
             ).sort_index()
-            df_all = df_all.infer_objects(copy=False)
+            df_all = df_all.infer_objects()
             df_all = df_all.interpolate(method="linear")
             df_all = df_all.ffill()
             df_all.dropna()  # drop any remaining NaNs
