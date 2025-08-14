@@ -67,6 +67,7 @@ class LivePlot:
             p = self.win.addPlot(title=title)
             p.showGrid(x=True, y=True)
             p.addLegend()
+            
             self._subplots.append({"plot": p, "curves": {}, "color_idx": 0})
             self.win.nextRow()
 

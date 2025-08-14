@@ -67,6 +67,7 @@ class FREEEMG(Device):
         self.qs.Init()
         self.bio.Sinks.Add(self.qs)
         self.connected_sensors()
+        self.fs = 1000
         return True
         
     def _ensure_attached(self):
@@ -174,8 +175,10 @@ class FREEEMG(Device):
         ch_data = {}  # ch_idx -> list[float]
 
         # Lee por canal
-        for ch_idx in range(1, self.num_channels + 1):
-            qsz = self.qs.QueueSize(ch_idx)
+
+
+        for ch_idx in range(0,self.num_channels-1):
+            qsz = self.qs.QueueSize(int(ch_idx))
             if qsz <= 0:
                 continue
 
@@ -193,20 +196,21 @@ class FREEEMG(Device):
 
         # Reconstrucción por-muestra (filas con todas las columnas EMG)
         if self._last_ts is None:
-            self._last_ts = time.time()
+            self._last_ts = pd.Timestamp.now() + pd.Timedelta(milliseconds=650)
         # Aproxima timestamps centrados en "ahora"
 
         # Las últimas muestras acaban "ya"; retrocede (max_n-1)/fs
-        t0 = self._last_ts + 1.5*(1.0 / self.fs)
+        delta = pd.Timedelta(seconds=1.0 / self.fs)
+        t0 = self._last_ts 
 
         rows = []
         max_n = max(len(v) for v in ch_data.values())
         for i in range(max_n):
-            ts = t0 + i / float(self.fs)
+            ts = t0 + i * delta
             row = {"Timestamp": ts}
-            for ch_idx in range(1, self.num_channels + 1):
+            for ch_idx in range(0, self.num_channels):
                 if ch_idx in ch_data and i < len(ch_data[ch_idx]):
-                    row[f"EMG{ch_idx}"] = ch_data[ch_idx][i]
+                    row[f"EMG{ch_idx+1}"] = ch_data[ch_idx][i]
                 # else: si faltan muestras en ese canal, se omite la columna en esta fila
                 
             rows.append(row)
@@ -223,14 +227,19 @@ class FREEEMG(Device):
         Devuelve un DataFrame con las muestras de EMG acumuladas en _emg_rows.
         Espera filas tipo: {"Timestamp": time.time(), "EMG1": v1, "EMG2": v2, ...}
         """
+        data_cols = []
         with self._lock:
             if not self._emg_rows:
                 return pd.DataFrame()
             timestamps = [r["Timestamp"] for r in self._emg_rows]  # lista de segundos UNIX
-            data_cols = [k for k in self._emg_rows[0].keys() if k != "Timestamp"]
-
+            for sview in self.bio.SensorsView.Values:
+                is_connected = getattr(sview, "Connected", False)
+                
+                if is_connected:
+                    data_cols.append(f'EMG{sview.Label}')
+           
 # Convierte a índice datetime
-            ts_index = pd.to_datetime(timestamps, unit="s", origin="unix")
+            ts_index = pd.to_datetime(timestamps)
 
 # Construye el DataFrame
             df = pd.DataFrame(
@@ -239,7 +248,8 @@ class FREEEMG(Device):
                 columns=data_cols
             )
 
-            df = df.sort_index().infer_objects()
+            df = df.sort_index().infer_objects()   
+            df.dropna()         
             return df
     
 

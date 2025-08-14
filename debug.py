@@ -9,12 +9,12 @@ list_serial_devices()
 try:
     devices = None
     # Crear dispositivo
-    dev = MioTracker(transport="serial", port="COM7", Fs=250, gain=1)
+    dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
     free = FREEEMG()
-    #sg = GSensor(com_port="COM8")
+    sg = GSensor(com_port="COM8")
     
 
-    devices = [dev, free]
+    devices = [dev, free,sg]
     for device in devices:
         device.connect()
         device.start()
@@ -25,11 +25,13 @@ try:
         # Graficar en vivo
     plotter = LivePlot(
         plots=[
-            {"get_df": lambda: dev.get_imu_df(), "title": "MioTracker EMG + IMU"},
-            {"get_df": lambda: dev.get_emg_df(onlyraw=True), "title": "MioTracker EMG + IMU"},
+            {"get_df": lambda: dev.get_emg_df(onlyraw=True), "title": "MioTracker EMG"},
+            {"get_df": lambda: dev.get_imu_df(), "title": "MioTracker IMU"},
             {"get_df": lambda: free.get_emg_df(), "title": "FREEEMG EMG"},
+            {"get_df": lambda: sg.get_imu_df(), "title": "BAIOBIT IMU"},
+
         ],
-        window_sec=3,
+        window_sec=10,
         refresh_hz=30,
         title="EMG + IMU Live",
     )

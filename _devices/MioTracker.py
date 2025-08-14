@@ -53,8 +53,8 @@ class MioTracker(BaseDevice):
         transport: str = "websocket",
         websocketuri: Optional[str] = None,
         port: Optional[str] = None,
-        Fs: int = 250,
-        baudrate: int = 115200,
+        Fs: int = 500,
+        baudrate: int = 100000,
         maxlen: int = 30,
         trim_sec: float = 0.1,
         gain: int = 6,
@@ -185,7 +185,7 @@ class MioTracker(BaseDevice):
         t_start = t0_list[0]
         t_end = t0_list[-1]
         n_points = len(rows)
-        t_uniform = pd.date_range(start=t_start, end=t_end, periods=n_points)
+        t_uniform = pd.date_range(start=t_start, end=t_end + pd.Timedelta(8*(1/self.Fs)), periods=n_points)
         df = pd.DataFrame(rows, index=pd.DatetimeIndex(t_uniform, name="Timestamp"))
         if self.trim_sec and not df.empty:
             t0 = df.index[0] + timedelta(seconds=float(self.trim_sec))
@@ -273,7 +273,7 @@ class MioTracker(BaseDevice):
         pkt = list()
         if not hasattr(self, "_ema"):
                     self._ema = _OnlineEMGOffsetComp(
-                        n_channels=1, Fs=self.Fs, tau_ms=300
+                        n_channels=1, Fs=self.Fs, tau_ms=100
                     )
         try:
             channels = [0]
@@ -287,13 +287,14 @@ class MioTracker(BaseDevice):
                 for _ in range(nwords):
                     if off + 4 > len(buf):
                         break
-                    val = struct.unpack_from("<f", buf, off)[0]
+                    val = struct.unpack_from("<f", buf, off)[0]/ self.gain / 1e2
                     off += 4
+                    #val = self.touV(val)
+
                     pkt.append(val)
             with self._lock:
                 pkt = np.array(pkt, float)
-                pkt = self.ads1292_raw_to_uV(pkt, return_volts=False)
-                corr = self._ema.update(pkt)  # aplica EMA por muestra
+                corr = self._ema.update(pkt)
                 self.emgTime.append(datetime.datetime.now())
                 self.emgData.append(corr.tolist())
                 self.emgRawData.append(pkt.tolist())
@@ -316,25 +317,27 @@ class MioTracker(BaseDevice):
         except Exception as e:
             print(f"[USB] IMU payload error: {e}")
             pass
-    def ads1292_raw_to_uV(self,raw, return_volts=True):
-        # Asegurar array
+    @staticmethod
+    def touV(raw, gain=8, vref=2.42):
+        """
+        raw: int, lista o np.ndarray con cuentas del ADC (24-bit) — aunque vengan como float,
+            representan cuentas enteras; aquí las redondeamos y firmamos a 24 bits.
+        Retorna: µV (float64)
+        """
+        x = raw
+        # Si viniera como float32 desde el firmware, conviértelo a entero:
+        if np.issubdtype(x.dtype, np.floating):
+            x = np.rint(x).astype(np.int64)
+        else:
+            x = x.astype(np.int64)
 
-        x = np.asarray(raw, dtype=np.int64)
+        # Extensión de signo 24-bit
+        x &= 0xFFFFFF
+        x = (x ^ 0x800000) - 0x800000
 
-        # Sign-extend de 24 bits (two's complement)
-        # Tomamos los 24 bits bajos y extendemos el signo
-        x24 = x & 0xFFFFFF
-        neg = x24 & 0x800000
-        signed = x24 - (1 << 24) * (neg > 0)
-
-        # LSB a ganancia 1 (tu factor): 0.288486515103... µV/LSB
-        LSB_uV_gain1 = 0.2884865151031631
-        uV_per_LSB = LSB_uV_gain1 / float(self.gain)
-
-        uV = signed.astype(np.float64) * uV_per_LSB
-        if return_volts:
-            return uV * 1e-6
-        return uV
+        # LSB exacto: (2*Vref/Gain)/(2^24 - 1)
+        lsb_V = (2.0 * vref / float(gain)) / ((1 << 24) - 1)
+        return x.astype(np.float64) * lsb_V * 1e6  # µV
 
 
 
