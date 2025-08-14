@@ -33,12 +33,14 @@ class _OnlineEMGOffsetComp:
         self.baseline = 0.0
 
     def reset(self):
+        """Reset the internal EMA baseline to zero."""
         self.baseline = 0.0
 
     def update(self, sample_vec):
+        """Apply the offset compensation to ``sample_vec``."""
         x = np.array(sample_vec, dtype=float)
 
-        for i,value in enumerate(x):
+        for i, value in enumerate(x):
             self.baseline = (1.0 - self.alpha) * self.baseline + self.alpha * x[i]
             x[i] = x[i] - self.baseline
 
@@ -59,6 +61,27 @@ class MioTracker(BaseDevice):
         trim_sec: float = 0.1,
         gain: int = 6,
     ) -> None:
+        """Initialize a MioTracker device.
+
+        Parameters
+        ----------
+        transport:
+            ``"serial"`` or ``"websocket"`` transport mode.
+        websocketuri:
+            URI used when ``transport`` is ``"websocket"``.
+        port:
+            Serial port name used when ``transport`` is ``"serial"``.
+        Fs:
+            Sampling frequency in Hz.
+        baudrate:
+            Serial baudrate when using serial transport.
+        maxlen:
+            Maximum buffer length in seconds.
+        trim_sec:
+            Seconds trimmed from the beginning of returned DataFrames.
+        gain:
+            Programmable amplifier gain.
+        """
         super().__init__()
         self._transport = transport
         if self._transport == "serial":
@@ -98,6 +121,7 @@ class MioTracker(BaseDevice):
     # Connection / disconnection
     # =====================
     def connect(self) -> bool:
+        """Open the underlying transport channel."""
         if self._transport == "serial":
             self.disconnect()
             self._ser = serial.Serial(
@@ -117,6 +141,7 @@ class MioTracker(BaseDevice):
         return False
 
     def disconnect(self, port: Optional[str] = None) -> bool:
+        """Close the transport channel and release resources."""
         if self._transport == "serial":
             if self._ser and self._ser.is_open:
                 print(f"[MioTracker] Closing serial port {self._ser.port}...")
@@ -134,9 +159,10 @@ class MioTracker(BaseDevice):
                 return True
 
     def start(self) -> None:
+        """Begin asynchronous acquisition depending on the transport."""
         if self._transport == "serial":
             if not self._ser or not self._ser.is_open:
-                print("Serial port not open. Call connect() first.")
+                print("[MioTracker] Serial port not open. Call connect() first.")
             if self._usb_thread is not None and self._usb_thread.is_alive():
                 self._usb_thread.join(timeout=1.0)
             self._usb_thread = UsbReader(self._ser, self._sCoder, debug=True)
@@ -145,10 +171,11 @@ class MioTracker(BaseDevice):
             print("[MioTracker] Acquisition started.")
         elif self._transport == "websocket":
             if not self._ws_client:
-                print("Socket not open. Call connect() first.")
+                print("[MioTracker] Socket not open. Call connect() first.")
             self._ws_client.subscribe(self._on_ws_frame)
 
     def stop(self) -> None:
+        """Stop acquisition and detach packet handlers."""
         if self._transport == "serial":
             self._usb_thread.stop()
             if self._usb_thread.is_alive():
@@ -161,9 +188,10 @@ class MioTracker(BaseDevice):
                 self._ws_client.desubscribe()
 
     def get_emg_df(self, onlyraw=False) -> pd.DataFrame:
+        """Return buffered EMG samples as a DataFrame."""
         with self._lock:
             if len(self.emgData) == 0:
-                print("No data received")
+                print("[MioTracker] No data received")
                 return pd.DataFrame()
 
         rows, ts = [], []
@@ -198,6 +226,7 @@ class MioTracker(BaseDevice):
             return df
 
     def get_imu_df(self) -> pd.DataFrame:
+        """Return buffered IMU samples as a DataFrame."""
         with self._lock:
             if len(self.imuData) == 0:
                 return pd.DataFrame()
@@ -230,6 +259,7 @@ class MioTracker(BaseDevice):
     # USB reading loop
     # =====================
     def _on_usb_packet(self, ptype: int, payload: bytes):
+        """Handle a packet from the ``UsbReader`` thread."""
         DATA_TYPE_EMG = 0
         DATA_TYPE_IMU = 1
         DATA_TYPE_STATUS = 2
@@ -244,6 +274,7 @@ class MioTracker(BaseDevice):
             pass
 
     def _on_ws_frame(self, data: bytes):
+        """Parse a frame coming from the WebSocket transport."""
         DATA_TYPE_EMG = 0
         DATA_TYPE_IMU = 1
         DATA_TYPE_STATUS = 2
@@ -269,12 +300,13 @@ class MioTracker(BaseDevice):
             pass
 
     def _parse_emg_payload(self, buf: bytes):
+        """Decode EMG samples from a raw USB ``payload``."""
         off = 0
         pkt = list()
         if not hasattr(self, "_ema"):
-                    self._ema = _OnlineEMGOffsetComp(
-                        n_channels=1, Fs=self.Fs, tau_ms=100
-                    )
+            self._ema = _OnlineEMGOffsetComp(
+                n_channels=1, Fs=self.Fs, tau_ms=100
+            )
         try:
             channels = [0]
             for ch in channels:
@@ -287,10 +319,8 @@ class MioTracker(BaseDevice):
                 for _ in range(nwords):
                     if off + 4 > len(buf):
                         break
-                    val = struct.unpack_from("<f", buf, off)[0]/ self.gain / 1e2
+                    val = struct.unpack_from("<f", buf, off)[0] / self.gain / 1e2
                     off += 4
-                    #val = self.touV(val)
-
                     pkt.append(val)
             with self._lock:
                 pkt = np.array(pkt, float)
@@ -303,6 +333,7 @@ class MioTracker(BaseDevice):
             pass
 
     def _parse_imu_payload(self, buf: bytes):
+        """Decode IMU samples from a raw USB ``payload``."""
         try:
             if len(buf) < 28:
                 return
@@ -319,11 +350,7 @@ class MioTracker(BaseDevice):
             pass
     @staticmethod
     def touV(raw, gain=8, vref=2.42):
-        """
-        raw: int, lista o np.ndarray con cuentas del ADC (24-bit) — aunque vengan como float,
-            representan cuentas enteras; aquí las redondeamos y firmamos a 24 bits.
-        Retorna: µV (float64)
-        """
+        """Convert raw ADC counts to microvolts."""
         x = raw
         # Si viniera como float32 desde el firmware, conviértelo a entero:
         if np.issubdtype(x.dtype, np.floating):
@@ -367,15 +394,15 @@ if __name__ == "__main__":
         plotter.start()
 
     except Exception as e:
-        print(f"Error connecting MioTracker: {e}")
+        print(f"[MioTracker] Error connecting: {e}")
         try:
             dev.stop()
             dev.disconnect()
         except Exception as e:
-            print(f"Error stopping/disconnecting MioTracker: {e}")
+            print(f"[MioTracker] Error stopping/disconnecting: {e}")
 
     df_all = dev.get_all_data()
     if not df_all.empty:
         out = f"miotracker_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         df_all.to_csv(out, index=True)
-        print(f"Guardado: {out}")
+        print(f"[MioTracker] Saved: {out}")

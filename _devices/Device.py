@@ -24,19 +24,24 @@ class Device(ABC):
 
     # ---- lifecycle ----
     @abstractmethod
-    def connect(self, **kwargs) -> None: ...
+    def connect(self, **kwargs) -> None:
+        """Establish communication with the physical device."""
 
     @abstractmethod
-    def start(self) -> None: ...
+    def start(self) -> None:
+        """Begin acquisition on the device."""
 
     @abstractmethod
-    def stop(self) -> None: ...
+    def stop(self) -> None:
+        """Halt acquisition without releasing resources."""
 
     @abstractmethod
-    def disconnect(self) -> None: ...
+    def disconnect(self) -> None:
+        """Release all resources and close the connection."""
 
     # ---- data access ----
     def get_all_data(self) -> pd.DataFrame:
+        """Merge EMG and IMU data into a single time-aligned DataFrame."""
         emg_df = pd.DataFrame()
         imu_df = pd.DataFrame()
         emg_df = self.get_emg_df()
@@ -65,15 +70,15 @@ class Device(ABC):
 
     @abstractmethod
     def get_emg_df(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        """Return the latest EMG samples as a ``pandas.DataFrame``."""
 
     @abstractmethod
     def get_imu_df(self) -> pd.DataFrame:
-        return pd.DataFrame()
+        """Return the latest IMU samples as a ``pandas.DataFrame``."""
 
     # ---- optional control ----
     def send_command(self, data: bytes | str) -> None:
-        pass
+        """Optional hook for device-specific command channels."""
 
     # ---- pub/sub for live consumers (GUI/recorder) ----
     def subscribe_emg(self, fn: EMGCallback) -> None:
@@ -102,7 +107,7 @@ class Device(ABC):
         ports = list(portList.comports())
         devices = []
         for p in ports:
-            print(p.device, p.name, p.description)
+            print(f"[Device] {p.device} {p.name} {p.description}")
             devices.append(
                 {
                     "device": p.device,
