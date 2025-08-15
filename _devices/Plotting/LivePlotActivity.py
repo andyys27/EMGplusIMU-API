@@ -78,8 +78,8 @@ class LivePlotActivity:
                 "line": None,    # pg.InfiniteLine
                 "overlay": cfg.get("overlay", "band"),
                 "detector": cfg.get("detector", None),  # BaseActivityDetector or None
-                "band_alpha": int(cfg.get("band_alpha", 60)),
-                "band_color": tuple(cfg.get("band_color", (255, 100, 0))),
+                "band_alpha": int(cfg.get("band_alpha", 40)),
+                "band_color": tuple(cfg.get("band_color", (255, 255, 255))),
                 "band_min_len": int(cfg.get("band_min_len", 3)),
                 "line_y": float(cfg.get("line_y", 0.0)),
             })
@@ -254,11 +254,11 @@ class LivePlotActivity:
     def start(self):
         self.win.show()
 
-        from PyQt5 import QtWidgets  # o PySide
+        from PyQt5 import QtWidgets
         import sys
 
         app = QtWidgets.QApplication.instance()
-        if app is None:  # si no existe, créala
+        if app is None:
             app = QtWidgets.QApplication(sys.argv)
 
-        sys.exit(app.exec_())  # si es PyQt5 o PySide2
+        app.exec_()  # <-- no sys.exit here
