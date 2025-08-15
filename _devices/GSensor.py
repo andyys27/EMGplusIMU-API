@@ -9,7 +9,7 @@ from typing import Callable, Optional, Iterable
 import os
 import pandas as pd
 import serial
-from ._utils.LivePlot import LivePlot
+from .Plotting.LivePlot import LivePlot
 from ._utils._utilsfn import list_serial_devices 
 # 1) Load your BTS SDK DLL (adjust path if needed)
 # Ruta base: la carpeta actual de este script

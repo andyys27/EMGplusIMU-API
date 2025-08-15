@@ -1,43 +1,50 @@
 
 from _devices.MioTracker import MioTracker
 from _devices.GSensor import GSensor
-from _devices._utils.LivePlot import LivePlot
+from _devices.Plotting.LivePlot import LivePlot
 from _devices.FREEEMG import FREEEMG
 from _devices._utils._utilsfn import list_serial_devices 
+from _devices._utils._utilsfn import exportCSV
+from _devices.activityDetection.activityDetectors import FixedThresholdDetector, AdaptiveMADDetector, ModelDetector
+from _devices.Plotting.LivePlotActivity import LivePlotActivity
+
+detector =  FixedThresholdDetector(fs=500, window_sec=0.001)
 
 list_serial_devices()
 try:
     devices = None
     # Crear dispositivo
     dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
-    free = FREEEMG()
-    sg = GSensor(com_port="COM8")
+    #free = FREEEMG()
+    #sg = GSensor(com_port="COM8")
     
 
-    devices = [dev, free,sg]
+    devices = [dev]
     for device in devices:
         device.connect()
         device.start()
     
 
+    
 
+    plots = [
+        {
+            "get_df": lambda: dev.get_imu_df(),
+            "title": "IMU",
+            "detector": detector, 
+            "overlay": "band",
+            "line_y": 0.0,
+        },
+    ]
 
-        # Graficar en vivo
-    plotter = LivePlot(
-        plots=[
-            {"get_df": lambda: dev.get_emg_df(onlyraw=True), "title": "MioTracker EMG"},
-            {"get_df": lambda: dev.get_imu_df(), "title": "MioTracker IMU"},
-            {"get_df": lambda: free.get_emg_df(), "title": "FREEEMG EMG"},
-            {"get_df": lambda: sg.get_imu_df(), "title": "BAIOBIT IMU"},
-
-        ],
-        window_sec=10,
-        refresh_hz=30,
-        title="EMG + IMU Live",
+    plotter = LivePlotActivity(
+        plots=plots,
+        window_sec=30,
+        refresh_hz=30.0,
+        title="IMU + Activity",
     )
+
     plotter.start()
-
-
 
     for device in devices:
         try:

@@ -1,7 +1,7 @@
 
 from _devices.MioTracker import MioTracker
 from _devices.GSensor import GSensor
-from _devices._utils.LivePlot import LivePlot
+from _devices.Plotting.LivePlot import LivePlot
 
 
 try:

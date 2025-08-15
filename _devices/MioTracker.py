@@ -8,7 +8,7 @@ import time
 from ._utils.WebSocketClient import WebSocketClient
 from ._utils.UsbReader import UsbReader
 from ._utils.serialCoder import SerialCoder
-from  ._utils.LivePlot import LivePlot
+from  .Plotting.LivePlot import LivePlot
 from collections import deque
 import struct
 import datetime
