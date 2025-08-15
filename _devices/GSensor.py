@@ -1,3 +1,5 @@
+"""Driver for the BTS GSensor inertial device."""
+
 import clr
 import time
 import matplotlib.pyplot as plt
@@ -9,10 +11,15 @@ from typing import Callable, Optional, Iterable
 import os
 import pandas as pd
 import serial
+<<<<<<< HEAD
 from .Plotting.LivePlot import LivePlot
 from ._utils._utilsfn import list_serial_devices 
+=======
+from ._utils.LivePlot import LivePlot
+from ._utils._utilsfn import list_serial_devices
+
+>>>>>>> 0c544fccc9f034a96884c2ae16a46392e0756516
 # 1) Load your BTS SDK DLL (adjust path if needed)
-# Ruta base: la carpeta actual de este script
 base_path = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(base_path, "dll", "Core.dll")
 clr.AddReference(dll_path)
@@ -29,15 +36,11 @@ from BTS.GS2.Core import (
 
 
 class GSensor(Device):
-    """
-    Dispositivo BAIOBIT (plantilla) compatible con la interfaz Device.
-    Soporta:
-      - Serial:   BAIOBIT(port="COM8", baud=115200)
-      - WebSocket: BAIOBIT(ws_url="ws://127.0.0.1:8765")
-    """
+    """BTS GSensor device compatible with the generic :class:`Device` API."""
 
     def __init__(self, com_port) -> None:
-            # 1) Create & configure the Supervisor
+        """Discover and prepare the sensor connected to ``com_port``."""
+        # 1) Create & configure the Supervisor
         self.manager = Supervisor()
         self.manager.SetLoggerState(True)
         self.manager.SetLoggerLevel(LogLevel.OFF)
@@ -68,16 +71,17 @@ class GSensor(Device):
     # --------------------------- Ciclo de vida ---------------------------
 
     def connect(self):
+        """Establish connection with the sensor."""
         if not self.sensor_info:
             raise RuntimeError("No sensor info available. Cannot connect.")
-        
+
         # 2) Grab the network object
-        idx          = self.manager.NetworksList.GetNetworkIndex(self.net_name)
+        idx = self.manager.NetworksList.GetNetworkIndex(self.net_name)
         self.network = self.manager.NetworksList[idx]
 
         existing_ports = [s.pPort for s in self.network.SensorsList]
         if self.sensor_info.Port not in existing_ports:
-            added = self.network.AddSensorToNetwork(self.sensor_info.Port)
+            self.network.AddSensorToNetwork(self.sensor_info.Port)
 
         # 3) Connect all networks
         ok, netResult, mask = self.manager.ConnectAllNetworks()
@@ -94,26 +98,28 @@ class GSensor(Device):
         self._configure()
         self.get_battery()
     def get_battery(self):
+        """Query and print the current battery level."""
         if not self.sensor:
-            print("Sensor not connected. Battery reading aborted.")
-            return 
+            print("[GSensor] Sensor not connected. Battery reading aborted.")
+            return
         ok, charging, percent = self.sensor.ReadBattery()
         if not ok:
             raise RuntimeError("ReadBattery failed.")
         state = " (charging)" if charging else ""
-        print(f"Battery: {percent}%{state}")
+        print(f"[GSensor] Battery: {percent}%{state}")
 
 
     def disconnect(self):
+        """Disconnect from the sensor and clean up resources."""
         if self.network:
             ok, mask = self.manager.DisconnectNetwork(self.network.pName)
             if ok:
-                print("Disconnected.")
+                print("[GSensor] Disconnected.")
             else:
-                print("Disconnect failed.")
+                print("[GSensor] Disconnect failed.")
             self.connected = not ok
             self.network = None
-            self.sensor  = None
+            self.sensor = None
 
 
 
@@ -157,128 +163,132 @@ class GSensor(Device):
         if not ok:
             raise RuntimeError(f"ApplySensorsConfiguration_ACQ failed ({cfgRes})")
         
-    def _rad_to_deg360(_,rad):
+    def _rad_to_deg360(_, rad):
+        """Convert radians to degrees in the range [0, 360)."""
         import math
         deg = math.degrees(rad)
         return deg % 360.0
+
     def start(self):
+        """Begin streaming samples from the sensor."""
         self._start_time = time.time()
+
         def _handler(sender, args):
             def print_frame(f):
-                """
-                Print out the 12 values in an IDataSample frame f.Sample.
-                """
+                """Print out the 12 values in an IDataSample frame ``f.Sample``."""
                 labels = [
                     "Acc X (m/s²)", "Acc Y (m/s²)", "Acc Z (m/s²)",
-                    "Gyro X (°/s)",  "Gyro Y (°/s)",  "Gyro Z (°/s)",
-                    "Mag X (µT)",    "Mag Y (µT)",    "Mag Z (µT)",
-                    "Roll (°)",      "Pitch (°)",     "Yaw (°)"
+                    "Gyro X (°/s)", "Gyro Y (°/s)", "Gyro Z (°/s)",
+                    "Mag X (µT)", "Mag Y (µT)", "Mag Z (µT)",
+                    "Roll (°)", "Pitch (°)", "Yaw (°)"
                 ]
                 for i, label in enumerate(labels):
                     val = f.Sample[i].value
-                    print(f"{label:12s}: {val:.3f}")
-                print("-" * 40)
+                    print(f"[GSensor] {label:12s}: {val:.3f}")
+                print("[GSensor] " + "-" * 40)
+
             try:
                 # 1) figure out which queue holds inertial data
                 qi = sender.DataQueueList.GetQueueIndex(QueueType.INTERTIAL)
 
                 # 2) create a .NET List[IDataSample] buffer and dump into it
-                ok,buf = sender.DataQueueList[qi].Dump()
+                ok, buf = sender.DataQueueList[qi].Dump()
                 if not ok or buf.Count == 0:
                     return
 
                 # 3) take the first frame
                 f = buf[0]
-                #print_frame(f)
-                t = time.time() #- self._start_time
+                # print_frame(f)
+                t = time.time()
 
                 # 4) unpack accel (indices 0–2)
                 ax, ay, az = (f.Sample[i].value for i in (0, 1, 2))
                 # 5) unpack gyro  (indices 3–5)
                 gx, gy, gz = (f.Sample[i].value for i in (3, 4, 5))
-               
-                # 6) unpack Euler angles roll,pitch,yaw (indices 9–11)
-                roll, pitch, yaw = (self._rad_to_deg360(f.Sample[i].value) for i in (9, 10, 11))
 
-                # 7) append a 10-tuple (t, ax,ay,az, gx,gy,gz, roll,pitch,yaw)
+                # 6) unpack Euler angles roll,pitch,yaw (indices 9–11)
+                roll, pitch, yaw = (
+                    self._rad_to_deg360(f.Sample[i].value) for i in (9, 10, 11)
+                )
+
+                # 7) append a 10-tuple (t, ax, ay, az, gx, gy, gz, roll, pitch, yaw)
                 self.data.append(
-                    (t, ax, ay, az,
-                        gx, gy, gz,
-                        roll, pitch, yaw)
+                    (t, ax, ay, az, gx, gy, gz, roll, pitch, yaw)
                 )
 
             except Exception as e:
-                print("Error in handler:", e)
-        
-        
+                print(f"[GSensor] Error in handler: {e}")
+
         self._acq_handler = _handler
         self.sensor.DataReady += self._acq_handler
         ok, _ = self.manager.StartOnlineAcquisitionOnNetwork(self.net_name)
         if not ok:
             self.sensor.DataReady -= self._acq_handler
             raise RuntimeError("StartOnlineAcquisitionOnNetwork failed")
+
     def stop(self):
         """Unsubscribe & stop acquisition."""
         if self._acq_handler:
             try:
                 self.sensor.DataReady -= self._acq_handler
-            except:
+            except Exception:
                 pass
             ok, mask = self.manager.StopOnlineAcquisitionOnNetwork(self.net_name)
-            print("⏹️ Acquisition stopped" if ok else " Stop failed")  
+            print("[GSensor] ⏹️ Acquisition stopped" if ok else "[GSensor] Stop failed")
 
 
     def get_imu_df(self) -> pd.DataFrame:
-            """Return IMU data with real datetime index."""
-            if not self.data:
-                return pd.DataFrame()
-            
-            rows = list(self.data)
-            # Separar timestamps y datos
-            timestamps = [r[0] for r in rows]  # primera columna
-            values = [r[1:] for r in rows]     # resto de columnas
+        """Return IMU data with real datetime index."""
+        if not self.data:
+            return pd.DataFrame()
 
-            data_cols = ["ax", "ay", "az", "gx", "gy", "gz", "roll", "pitch", "yaw"]
-            ts_index = pd.to_datetime(timestamps, unit="s", origin="unix")
-            df = pd.DataFrame(values, index=pd.DatetimeIndex(ts_index, name="Timestamp"), columns=data_cols)
-            df = df.sort_index()
+        rows = list(self.data)
+        timestamps = [r[0] for r in rows]
+        values = [r[1:] for r in rows]
 
-            return df
-    
+        data_cols = ["ax", "ay", "az", "gx", "gy", "gz", "roll", "pitch", "yaw"]
+        ts_index = pd.to_datetime(timestamps, unit="s", origin="unix")
+        df = pd.DataFrame(values, index=pd.DatetimeIndex(ts_index, name="Timestamp"), columns=data_cols)
+        df = df.sort_index()
+
+        return df
+
     def get_emg_df(self) -> pd.DataFrame:
+        """This device does not provide EMG data."""
         return pd.DataFrame()
-        
 
     def print_queue(self):
-        """
-        Take a snapshot of the internal data queue and print each (t, ax, ay, az).
-        Does not remove items from the queue.
-        """
+        """Print a snapshot of the internal data queue."""
         snapshot = list(self.data)  # peek without popping
         if not snapshot:
-            print("🔎 Queue is empty.")
+            print("[GSensor] 🔎 Queue is empty.")
             return
 
-        print(f"🔎 Queue has {len(snapshot)} items:")
+        print(f"[GSensor] 🔎 Queue has {len(snapshot)} items:")
         for idx, (t, ax, ay, az, gx, gy, gz, roll, pitch, yaw) in enumerate(self.data, 1):
-            print(f"{idx:3d}: t={t:.3f}s  "
+            print(
+                f"[GSensor] {idx:3d}: t={t:.3f}s  "
                 f"Acc=({ax:.2f},{ay:.2f},{az:.2f})  "
                 f"Gyro=({gx:.2f},{gy:.2f},{gz:.2f})  "
-                f"Euler=({roll:.1f}°,{pitch:.1f}°,{yaw:.1f}°)")
+                f"Euler=({roll:.1f}°,{pitch:.1f}°,{yaw:.1f}°)"
+            )
+
     def __enter__(self):
-        print("Entering GSensor context manager")
+        """Enter context manager and return ``self``."""
+        print("[GSensor] Entering context manager")
         return self
 
     def __exit__(self, exc_type, exc_val, tb):
-        print("Exiting GSensor context manager")
+        """Exit context manager ensuring the device is disconnected."""
+        print("[GSensor] Exiting context manager")
         if exc_type:
-            print(f"[!] Exception {exc_type.__name__} raised—disconnecting sensor")
+            print(f"[GSensor] Exception {exc_type.__name__} raised—disconnecting sensor")
         self.disconnect()
         return False
 
-    
     def _on_sdk_error(self, source, error_code, comment):
-        print(f"[SDK ERROR] {source}: {comment}  → disconnecting")
+        """Callback for BTS SDK errors."""
+        print(f"[GSensor] [SDK ERROR] {source}: {comment}  → disconnecting")
         self.disconnect()
 
 # ---------------------------------------------------------------------
@@ -308,7 +318,7 @@ if __name__ == "__main__":
         dev.stop()
         dev.disconnect()
     except Exception as e:
-        print("Error:", e)
+        print(f"[GSensor] Error: {e}")
     finally:
         dev.stop()
         dev.disconnect()
