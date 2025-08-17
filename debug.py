@@ -12,12 +12,12 @@ detector =  FixedThresholdDetector(fs=500, window_sec=0.001)
 list_serial_devices()
 try:
     # Crear dispositivo
-    dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
-    #devices[1] = FREEEMG()
+    #dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
+    fr = FREEEMG()
     #sg = GSensor(com_port="COM8")
     
 
-    devices = [dev]
+    devices = [fr]
     for device in devices:
         device.connect()
         device.start()
@@ -28,7 +28,7 @@ try:
     plots = [
         
         {
-            "get_df": lambda: dev.get_emg_df(onlyraw=True),
+            "get_df": lambda: fr.get_emg_df(),
             "title": "IMU",
             "detector": detector, 
             "overlay": "band",

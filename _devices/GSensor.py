@@ -11,14 +11,10 @@ from typing import Callable, Optional, Iterable
 import os
 import pandas as pd
 import serial
-<<<<<<< HEAD
+
 from .Plotting.LivePlot import LivePlot
 from ._utils._utilsfn import list_serial_devices 
-=======
-from ._utils.LivePlot import LivePlot
-from ._utils._utilsfn import list_serial_devices
 
->>>>>>> 0c544fccc9f034a96884c2ae16a46392e0756516
 # 1) Load your BTS SDK DLL (adjust path if needed)
 base_path = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(base_path, "dll", "Core.dll")
