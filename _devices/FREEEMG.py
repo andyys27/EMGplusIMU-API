@@ -222,7 +222,7 @@ class FREEEMG(Device):
         # self._emit_if_ready()
 
         return True
-    def get_emg_df(self) -> pd.DataFrame:
+    def get_emg_df(self,channel = None) -> pd.DataFrame:
         """
         Devuelve un DataFrame con las muestras de EMG acumuladas en _emg_rows.
         Espera filas tipo: {"Timestamp": time.time(), "EMG1": v1, "EMG2": v2, ...}
@@ -250,9 +250,13 @@ class FREEEMG(Device):
 
             df = df.sort_index().infer_objects()   
             df.dropna()         
-            return df
-    
-
+            if channel is None:
+                return df
+            else:
+                try:
+                    return df[[channel]]
+                except KeyError:
+                    return df
 
     def get_imu_df(self) -> pd.DataFrame:
 

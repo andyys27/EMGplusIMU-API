@@ -39,14 +39,19 @@ class LivePlotActivity:
         self.window_sec = float(window_sec)
         self.refresh_ms = max(1, int(1000.0 / float(refresh_hz)))
         self.title = title
-
+        self.last_detections: Dict[int, np.ndarray] = {}
         self.app = pg.mkQApp(self.title)
         self.win: Optional[pg.GraphicsLayoutWidget] = None
         self.timer: Optional[QtCore.QTimer] = None
-
+        self.last_masks: Dict[int, pd.Series] = {} 
         # Per subplot state
         self._subplots: List[Dict[str, object]] = []
         self._build_ui()
+        # --- in __init__ of your class ---
+        self.jaccard_history = []   # list of matrices
+        self.jaccard_mean = None    # optional mean over N
+        self.print_every = 30     # how many samples until printing
+        
     @staticmethod
     def _contiguous_regions(mask: np.ndarray) -> Sequence[tuple[int, int]]:
         """
@@ -120,7 +125,87 @@ class LivePlotActivity:
             df.index = base + pd.to_timedelta(df.index, unit="s")
             return df
         return None
+    @staticmethod
+    def _jaccard_series(a: pd.Series, b: pd.Series, mode: str = "union") -> float:
+        """
+        Jaccard between two boolean Series with potentially different indices.
+        mode = "union": align on union of timestamps (missing -> False).
+        mode = "intersect": align on intersection only.
+        """
+        if a is None or b is None or a.empty or b.empty:
+            return float("nan")
 
+        if mode == "union":
+            idx = a.index.union(b.index).unique().sort_values()
+            aa = a.reindex(idx, fill_value=False).to_numpy(dtype=bool)
+            bb = b.reindex(idx, fill_value=False).to_numpy(dtype=bool)
+        else:  # "intersect"
+            idx = a.index.intersection(b.index).unique().sort_values()
+            if len(idx) == 0:
+                return float("nan")
+            aa = a.reindex(idx).to_numpy(dtype=bool)
+            bb = b.reindex(idx).to_numpy(dtype=bool)
+
+        inter = np.logical_and(aa, bb).sum()
+        union = np.logical_or(aa, bb).sum()
+        return 1.0 if union == 0 else float(inter / union)
+    @staticmethod
+    def _dedup_bool_series(s: pd.Series) -> pd.Series:
+        """
+        Garantiza índice único y ordenado en una Series booleana.
+        - Si hay timestamps duplicados, los colapsa usando OR (max).
+        """
+        if s is None or s.empty:
+            return s
+        # asegurar tipo bool
+        s = s.astype(bool)
+        # colapsar duplicados por índice usando OR (max sobre bool)
+        if s.index.has_duplicates:
+            s = s.groupby(s.index).max()
+        # ordenar por seguridad
+        s = s.sort_index()
+        return s
+
+    @staticmethod
+    def _jaccard_series(a: pd.Series, b: pd.Series, mode: str = "union") -> float:
+        """
+        Jaccard entre dos Series booleanas con índices (potencialmente) distintos
+        y/o duplicados. Primero deduplica (OR por timestamp), luego alinea.
+        mode = "union" (faltantes->False) o "intersect".
+        """
+        if a is None or b is None or a.empty or b.empty:
+            return float("nan")
+
+        a = LivePlotActivity._dedup_bool_series(a)
+        b = LivePlotActivity._dedup_bool_series(b)
+
+        if mode == "union":
+            idx = a.index.union(b.index).unique().sort_values()
+            aa = a.reindex(idx, fill_value=False).to_numpy(dtype=bool)
+            bb = b.reindex(idx, fill_value=False).to_numpy(dtype=bool)
+        else:  # "intersect"
+            idx = a.index.intersection(b.index).unique().sort_values()
+            if len(idx) == 0:
+                return float("nan")
+            aa = a.reindex(idx).to_numpy(dtype=bool)
+            bb = b.reindex(idx).to_numpy(dtype=bool)
+
+        inter = np.logical_and(aa, bb).sum()
+        union = np.logical_or(aa, bb).sum()
+        return 1.0 if union == 0 else float(inter / union)
+    def _pairwise_jaccard_last(self, mode: str = "union") -> Optional[np.ndarray]:
+        """Compute pairwise Jaccard for the latest masks across all subplots."""
+        keys = sorted(self.last_masks.keys())
+        if len(keys) < 2:
+            return None
+        P = len(keys)
+        M = np.full((P, P), np.nan, dtype=float)
+        for ii in range(P):
+            M[ii, ii] = 1.0
+            for jj in range(ii + 1, P):
+                J = self._jaccard_series(self.last_masks[keys[ii]], self.last_masks[keys[jj]], mode=mode)
+                M[ii, jj] = M[jj, ii] = J
+        return M
     def _ensure_curve(self, subplot_idx: int, col: str):
         curves: Dict[str, pg.PlotDataItem] = self._subplots[subplot_idx]["curves"]  # type: ignore
         if col not in curves:
@@ -209,6 +294,7 @@ class LivePlotActivity:
             # run detector on the numeric slice (aligned with x)
 
             act = detector.detect(df_num)
+            self.last_masks[i] = pd.Series(act.astype(bool), index=df_num.index)
 
             if act.size != len(df_num):
                 # align length if needed
@@ -241,6 +327,7 @@ class LivePlotActivity:
                     self._subplots[i]["bands"].append(region)  # type: ignore
                 # hide line when using band
                 self._set_line_visible(i, False, self._subplots[i]["line_y"])  # type: ignore
+                
 
             elif overlay == "line":
                 is_active_now = bool(act[-1] == 1)
@@ -250,6 +337,32 @@ class LivePlotActivity:
             # keep autorange responsive
             plot_item: pg.PlotItem = self._subplots[i]["plot"]  # type: ignore
             plot_item.enableAutoRange(x=True, y=True)
+            keys = sorted(self.last_masks.keys())
+            if len(keys) == 2:
+                J = self._jaccard_series(
+                    self.last_masks[keys[0]],
+                    self.last_masks[keys[1]],
+                    mode="union"
+                )
+                self.jaccard_matrix = J
+                self.jaccard_history.append(J)
+
+
+                if len(self.jaccard_history) >= self.print_every:
+                    stacked = np.stack(self.jaccard_history[-self.print_every:], axis=0)
+                    self.jaccard_mean = np.nanmean(stacked, axis=0)
+
+                    if self.jaccard_mean.size == 1:
+                        # Single scalar → print without brackets
+                        print(f"Mean Jaccard: {self.jaccard_mean.item():.3f}")
+                    else:
+                        with np.printoptions(precision=3, suppress=True):
+                            print(f"Mean Jaccard")
+                            print(self.jaccard_mean)
+
+                    self.jaccard_history.clear()
+
+
 
     def start(self):
         self.win.show()

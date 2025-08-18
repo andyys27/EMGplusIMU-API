@@ -64,7 +64,9 @@ class FixedThresholdDetector(BaseActivityDetector):
       - float -> same threshold for the RMS (after channel-mean)
       - dict  -> per-column threshold (take max across columns to trigger)
     """
-    thresholds: Union[float, Dict[str, float]] = 20.0  # tune to your signal units
+    def __init__(self,fs=500, window_sec=0.03, threshold=0.01):
+        super().__init__(fs=fs, window_sec=window_sec)
+        self.threshold = threshold
 
     def detect(self, df: pd.DataFrame) -> np.ndarray:
         if df is None or df.empty:
@@ -80,7 +82,7 @@ class FixedThresholdDetector(BaseActivityDetector):
 
         for j, col in enumerate(cols):
             rms_j = _rolling_rms(X[:, [j]], win)
-            thr_j = 15
+            thr_j = self.threshold
             act = np.maximum(act, (rms_j > thr_j).astype(int))
 
         return act
@@ -195,4 +197,129 @@ class ModelDetector(BaseActivityDetector):
         # backfill early samples with first label
         if n > 0:
             preds[:win - 1] = preds[win - 1]
+        return preds
+
+
+
+import onnxruntime as ort
+
+def _ensure_2d_numeric(df: pd.DataFrame) -> np.ndarray:
+    X = df.select_dtypes(include=[np.number]).to_numpy(dtype=np.float32)
+    if X.ndim == 1:
+        X = X[:, None]
+    return X
+
+def _bandpass_fir_scipy(x: np.ndarray, fs: float, low=20.0, high=450.0, order=4):
+    # Optional: if you used filtering in training, replicate here.
+    # For simplicity, no-op by default to avoid SciPy dependency on 32-bit.
+    return x
+
+def _zscore_per_channel(x: np.ndarray) -> np.ndarray:
+    mu = x.mean(axis=-1, keepdims=True)
+    sd = x.std(axis=-1, keepdims=True) + 1e-8
+    return (x - mu) / sd
+
+@dataclass
+class ModelDetectorONNX(BaseActivityDetector):
+    """
+    ONNX-based sliding-window detector for EMG.
+
+    Assumes the ONNX model expects input of shape (B, C, T) with float32 and
+    outputs either:
+      - logits (apply sigmoid), or
+      - probabilities in [0,1].
+
+    Parameters
+    ----------
+    fs : float
+        Sampling rate (Hz).
+    window_sec : float
+        Sliding window length in seconds.
+    onnx_path : str
+        Path to the exported .onnx model.
+    input_name : Optional[str]
+        Name of the ONNX input node. If None, the first input name is used.
+    output_name : Optional[str]
+        Name of the ONNX output node. If None, the first output name is used.
+    post_sigmoid : bool
+        If True, apply sigmoid to model outputs (logits -> prob).
+        If False, assume model already returns probabilities.
+    use_filter : bool
+        If True, apply a basic band-pass (implement as needed).
+    """
+    fs: float
+    window_sec: float = 1.0
+    onnx_path: str = "model.onnx"
+    input_name: Optional[str] = None
+    output_name: Optional[str] = None
+    post_sigmoid: bool = True
+    use_filter: bool = False
+
+    def __post_init__(self):
+        import os
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        self.onnx_path = os.path.join(base_path, self.onnx_path)
+        self._sess = ort.InferenceSession(self.onnx_path, providers=["CPUExecutionProvider"])
+        if self.input_name is None:
+            self.input_name = self._sess.get_inputs()[0].name
+        if self.output_name is None:
+            self.output_name = self._sess.get_outputs()[0].name
+        self._win = max(1, int(self.window_sec * self.fs))
+
+    @staticmethod
+    def _sigmoid(x: np.ndarray) -> np.ndarray:
+        return 1.0 / (1.0 + np.exp(-x))
+
+    def _preprocess(self, Xi: np.ndarray) -> np.ndarray:
+        """
+        Xi: (C, T) float32 EMG window.
+        Apply the same preprocessing used at training time.
+        """
+        x = Xi
+        if self.use_filter:
+            x = _bandpass_fir_scipy(x, self.fs)
+        x = _zscore_per_channel(x)
+        return x.astype(np.float32, copy=False)
+
+    def _run_model(self, Xi: np.ndarray) -> float:
+        """
+        Xi: (C, T) preprocessed
+        Returns prob(actividad) in [0,1]
+        """
+        x_in = Xi[None, ...]  # (1, C, T)
+        out = self._sess.run([self.output_name], {self.input_name: x_in})[0]
+        # out shape could be (1,) or (1,1) — squeeze to scalar
+        y = float(np.array(out).squeeze())
+        return float(self._sigmoid(y) if self.post_sigmoid else y)
+
+    def detect(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Slide over df with step=1 sample.
+        For each window, run ONNX and assign label to the window end sample.
+        Returns a vector of 0/1 with len(df).
+        """
+        if df is None or df.empty:
+            return np.array([], dtype=int)
+
+        X = _ensure_2d_numeric(df)         # (T, C)
+        X = X.T                             # -> (C, T)
+        C, T = X.shape
+        win = min(self._win, T)
+
+        preds = np.zeros(T, dtype=int)
+        if T < win:
+            # use the whole sequence once
+            prob = self._run_model(self._preprocess(X[:, :T]))
+            preds[:] = 1 if prob >= 0.5 else 0
+            return preds
+
+        # main sliding loop
+        for end in range(win, T + 1):
+            Xi = X[:, end - win:end]               # (C, win)
+            Xi = self._preprocess(Xi)
+            prob = self._run_model(Xi)
+            preds[end - 1] = 1 if prob >= 0.5 else 0
+
+        # backfill the initial (win-1) samples
+        preds[:win - 1] = preds[win - 1]
         return preds
