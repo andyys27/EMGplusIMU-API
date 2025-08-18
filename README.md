@@ -18,14 +18,16 @@ EMGplusIMU-API provides a unified Python interface for electromyography (EMG) an
   - `PyQt5`, `pyqtgraph` for live plots
 
 ## Installation
-```bash
-# clone repository
-git clone https://github.com/your-user/EMGplusIMU-API.git
-cd EMGplusIMU-API
 
-# install dependencies
-pip install pandas numpy pyserial websocket-client pythonnet PyQt5 pyqtgraph
-```
+# Create the conda environment in 32-bit mode
+conda create -n emgplusimu python=3.8 --platform win-32
+
+# Activate environment
+conda activate emgplusimu
+
+# Install dependencies from requirements.txt
+pip install -r requirements.txt
+
 
 ## Usage
 Create a device using the factory and acquire EMG/IMU data:
@@ -60,8 +62,26 @@ EMGplusIMU-API/
 └── docs/                   # additional documentation
 ```
 
-## Credits
-Created and maintained by the EMGplusIMU-API contributors.
+## Citation
+If you use this, please cite the following reference:
 
-## License
-This project is licensed under the [MIT License](LICENSE).
+> Fuentes-Aguilar, R.Q., Llorente-Vidrio, D., Campos-Macias, L., *et
+> al.*\
+> *Surface electromyography dataset from different movements of the hand
+> using a portable and a non-portable device.*\
+> *Data in Brief*, 57, 111079, 2025.\
+> https://doi.org/10.1016/j.dib.2025.111079
+
+## BibTeX
+
+``` bibtex
+@article{FuentesAguilar2025EMG,
+  title={Surface electromyography dataset from different movements of the hand using a portable and a non-portable device},
+  author={Fuentes-Aguilar, R.Q. and Llorente-Vidrio, D. and Campos-Macias, L. and others},
+  journal={Data in Brief},
+  volume={57},
+  pages={111079},
+  year={2025},
+  publisher={Elsevier},
+  doi={10.1016/j.dib.2025.111079}
+}
