@@ -16,17 +16,23 @@ EMGplusIMU-API provides a unified Python interface for electromyography (EMG) an
   - `pyserial`, `websocket-client`
   - `pythonnet` (required for BTS devices on Windows)
   - `PyQt5`, `pyqtgraph` for live plots
+# Installation Guide
 
-## Installation
-
-# Create the conda environment in 32-bit mode
+## 1. Create the Conda Environment (32-bit)
+```bash
 conda create -n emgplusimu python=3.8 --platform win-32
+```
 
-# Activate environment
+## 2. Activate the Environment
+```bash
 conda activate emgplusimu
+```
 
-# Install dependencies from requirements.txt
+## 3. Install Dependencies
+```bash
 pip install -r requirements.txt
+```
+
 
 
 ## Usage
