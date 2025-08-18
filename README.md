@@ -20,12 +20,12 @@ EMGplusIMU-API provides a unified Python interface for electromyography (EMG) an
 
 1. Create the Conda Environment (32-bit)
 ```bash
-conda create -n emgplusimu python=3.8 --platform win-32
+conda env create -f environment.yml --platform win-32
 ```
 
 2. Activate the Environment
 ```bash
-conda activate emgplusimu
+conda activate {name}
 ```
 
 3. Install Dependencies
