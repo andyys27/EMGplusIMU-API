@@ -196,7 +196,7 @@ class FREEEMG(Device):
 
         # Reconstrucción por-muestra (filas con todas las columnas EMG)
         if self._last_ts is None:
-            self._last_ts = pd.Timestamp.now() + pd.Timedelta(milliseconds=1000)
+            self._last_ts = pd.Timestamp.now() + pd.Timedelta(milliseconds=600)
         # Aproxima timestamps centrados en "ahora"
 
         # Las últimas muestras acaban "ya"; retrocede (max_n-1)/fs

@@ -319,7 +319,7 @@ class MioTracker(BaseDevice):
                 for _ in range(nwords):
                     if off + 4 > len(buf):
                         break
-                    val = struct.unpack_from("<f", buf, off)[0] / self.gain / 1e2
+                    val = struct.unpack_from("<f", buf, off)[0] / self.gain / 1e3
                     off += 4
                     pkt.append(val)
             with self._lock:

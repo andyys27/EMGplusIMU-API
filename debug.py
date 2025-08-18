@@ -7,20 +7,20 @@ from _devices._utils._utilsfn import list_serial_devices,exportCSV
 from _devices.activityDetection.activityDetectors import FixedThresholdDetector, AdaptiveMADDetector, ModelDetector,ModelDetectorONNX
 from _devices.Plotting.LivePlotActivity import LivePlotActivity
 
-detector =  FixedThresholdDetector(fs=1000, window_sec=0.15, threshold=0.00001)
-#detector = AdaptiveMADDetector(fs = 1000, window_sec=0.01,baseline_sec = 5)
+detectorMio =  FixedThresholdDetector(fs=500, window_sec=0.1, threshold=0.00001)
+detectorFree = FixedThresholdDetector(fs=1000, window_sec=0.1, threshold=0.000015)
 
 
 
 list_serial_devices()
 try:
     # Crear dispositivo
-    dev = MioTracker(transport="websocket", port="COM6", Fs=500, gain=8)
+    dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
     fr = FREEEMG()
     #sg = GSensor(com_port="COM8")
     
 
-    devices = [fr]
+    devices = [dev,fr]
     for device in devices:
         device.connect()
         device.start()
@@ -33,24 +33,24 @@ try:
 
         
         {
-            "get_df": lambda: fr.get_emg_df(channel='EMG1'),
-            "title": "EMG",
-            "detector": detector, 
+            "get_df": lambda: dev.get_emg_df(onlyraw=True),
+            "title": "MioTracker",
+            "detector": detectorMio, 
             "overlay": "band",
             "line_y": 0.0,
         }, 
         {
-            "get_df": lambda: fr.get_emg_df(channel='EMG2'),
-            "title": "EMG",
-            "detector": detector, 
+            "get_df": lambda: fr.get_emg_df(),
+            "title": "Comercial Device",
+            "detector": detectorFree, 
             "overlay": "band",
             "line_y": 0.0,
-        }, 
+        },
     ]
 
     plotter = LivePlotActivity(
         plots=plots,
-        window_sec=5,
+        window_sec=5 ,
         refresh_hz=30.0,
         title="IMU + Activity",
     )

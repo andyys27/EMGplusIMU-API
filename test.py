@@ -1,5 +1,3 @@
-import torch
-print("Torch:", torch.__version__)
-print("CUDA disponible:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("GPU:", torch.cuda.get_device_name(0))
+from _devices._utils._utilsfn import list_serial_devices
+
+list_serial_devices()

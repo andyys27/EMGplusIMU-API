@@ -50,7 +50,7 @@ class LivePlotActivity:
         # --- in __init__ of your class ---
         self.jaccard_history = []   # list of matrices
         self.jaccard_mean = None    # optional mean over N
-        self.print_every = 30     # how many samples until printing
+        self.print_every = 10     # how many samples until printing
         
     @staticmethod
     def _contiguous_regions(mask: np.ndarray) -> Sequence[tuple[int, int]]:
@@ -125,30 +125,7 @@ class LivePlotActivity:
             df.index = base + pd.to_timedelta(df.index, unit="s")
             return df
         return None
-    @staticmethod
-    def _jaccard_series(a: pd.Series, b: pd.Series, mode: str = "union") -> float:
-        """
-        Jaccard between two boolean Series with potentially different indices.
-        mode = "union": align on union of timestamps (missing -> False).
-        mode = "intersect": align on intersection only.
-        """
-        if a is None or b is None or a.empty or b.empty:
-            return float("nan")
-
-        if mode == "union":
-            idx = a.index.union(b.index).unique().sort_values()
-            aa = a.reindex(idx, fill_value=False).to_numpy(dtype=bool)
-            bb = b.reindex(idx, fill_value=False).to_numpy(dtype=bool)
-        else:  # "intersect"
-            idx = a.index.intersection(b.index).unique().sort_values()
-            if len(idx) == 0:
-                return float("nan")
-            aa = a.reindex(idx).to_numpy(dtype=bool)
-            bb = b.reindex(idx).to_numpy(dtype=bool)
-
-        inter = np.logical_and(aa, bb).sum()
-        union = np.logical_or(aa, bb).sum()
-        return 1.0 if union == 0 else float(inter / union)
+  
     @staticmethod
     def _dedup_bool_series(s: pd.Series) -> pd.Series:
         """
@@ -165,7 +142,16 @@ class LivePlotActivity:
         # ordenar por seguridad
         s = s.sort_index()
         return s
+    @staticmethod
+    def _align_bool_series(a: pd.Series, b: pd.Series, freq: str = "10ms"):
+        # crear rango común basado en min/max de ambos
+        start = min(a.index.min(), b.index.min())
+        end   = max(a.index.max(), b.index.max())
+        idx = pd.date_range(start, end, freq=freq)
 
+        aa = a.resample(freq).max().reindex(idx, method='nearest')
+        bb = b.resample(freq).max().reindex(idx, method='nearest')
+        return aa, bb
     @staticmethod
     def _jaccard_series(a: pd.Series, b: pd.Series, mode: str = "union") -> float:
         """
@@ -175,23 +161,15 @@ class LivePlotActivity:
         """
         if a is None or b is None or a.empty or b.empty:
             return float("nan")
+        #a = LivePlotActivity._dedup_bool_series(a)
+        #b = LivePlotActivity._dedup_bool_series(b)
+        
+        a, b = LivePlotActivity._align_bool_series(a, b, freq="10ms")   # opción 1
+        
+    
 
-        a = LivePlotActivity._dedup_bool_series(a)
-        b = LivePlotActivity._dedup_bool_series(b)
-
-        if mode == "union":
-            idx = a.index.union(b.index).unique().sort_values()
-            aa = a.reindex(idx, fill_value=False).to_numpy(dtype=bool)
-            bb = b.reindex(idx, fill_value=False).to_numpy(dtype=bool)
-        else:  # "intersect"
-            idx = a.index.intersection(b.index).unique().sort_values()
-            if len(idx) == 0:
-                return float("nan")
-            aa = a.reindex(idx).to_numpy(dtype=bool)
-            bb = b.reindex(idx).to_numpy(dtype=bool)
-
-        inter = np.logical_and(aa, bb).sum()
-        union = np.logical_or(aa, bb).sum()
+        inter = np.logical_and(a, b).sum()
+        union = np.logical_or(a, b).sum()
         return 1.0 if union == 0 else float(inter / union)
     def _pairwise_jaccard_last(self, mode: str = "union") -> Optional[np.ndarray]:
         """Compute pairwise Jaccard for the latest masks across all subplots."""
@@ -338,6 +316,7 @@ class LivePlotActivity:
             plot_item: pg.PlotItem = self._subplots[i]["plot"]  # type: ignore
             plot_item.enableAutoRange(x=True, y=True)
             keys = sorted(self.last_masks.keys())
+            
             if len(keys) == 2:
                 J = self._jaccard_series(
                     self.last_masks[keys[0]],

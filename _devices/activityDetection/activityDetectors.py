@@ -201,7 +201,7 @@ class ModelDetector(BaseActivityDetector):
 
 
 
-import onnxruntime as ort
+#import onnxruntime as ort
 
 def _ensure_2d_numeric(df: pd.DataFrame) -> np.ndarray:
     X = df.select_dtypes(include=[np.number]).to_numpy(dtype=np.float32)
