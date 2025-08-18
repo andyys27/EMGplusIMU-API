@@ -352,13 +352,13 @@ class MioTracker(BaseDevice):
     def touV(raw, gain=8, vref=2.42):
         """Convert raw ADC counts to microvolts."""
         x = raw
-        # Si viniera como float32 desde el firmware, conviértelo a entero:
+        # If the firmware sends float32 values, cast them to integers.
         if np.issubdtype(x.dtype, np.floating):
             x = np.rint(x).astype(np.int64)
         else:
             x = x.astype(np.int64)
 
-        # Extensión de signo 24-bit
+        # 24-bit sign extension
         x &= 0xFFFFFF
         x = (x ^ 0x800000) - 0x800000
 
@@ -371,9 +371,11 @@ class MioTracker(BaseDevice):
 if __name__ == "__main__":
 
     try:
-        # Crear dispositivo
-        #dev = MioTracker(transport="serial", port="COM7", Fs=1000)
-        dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
+        # Create device
+        # dev = MioTracker(transport="serial", port="COM7", Fs=1000)
+        dev = MioTracker(
+            transport="websocket", websocketuri="ws://miotracker.local/start"
+        )
 
         dev.list_serial_devices()
         # dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
@@ -381,7 +383,7 @@ if __name__ == "__main__":
         dev.connect()
         dev.start()
 
-        # Graficar en vivo
+        # Live plotting
         plotter = LivePlot(
             plots=[
                 {"get_df": lambda: dev.get_emg_df(onlyraw=True), "title": "EMG"},

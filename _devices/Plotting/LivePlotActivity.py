@@ -128,15 +128,15 @@ class LivePlotActivity:
   
     @staticmethod
     def _dedup_bool_series(s: pd.Series) -> pd.Series:
-        """
-        Garantiza índice único y ordenado en una Series booleana.
-        - Si hay timestamps duplicados, los colapsa usando OR (max).
+        """Ensure a boolean Series has unique, sorted index values.
+
+        If duplicated timestamps exist, they are collapsed using logical OR.
         """
         if s is None or s.empty:
             return s
         # asegurar tipo bool
         s = s.astype(bool)
-        # colapsar duplicados por índice usando OR (max sobre bool)
+        # Collapse duplicate timestamps using OR (max over bool)
         if s.index.has_duplicates:
             s = s.groupby(s.index).max()
         # ordenar por seguridad
@@ -144,7 +144,7 @@ class LivePlotActivity:
         return s
     @staticmethod
     def _align_bool_series(a: pd.Series, b: pd.Series, freq: str = "10ms"):
-        # crear rango común basado en min/max de ambos
+        # Create a common range based on the min/max of both indices
         start = min(a.index.min(), b.index.min())
         end   = max(a.index.max(), b.index.max())
         idx = pd.date_range(start, end, freq=freq)
@@ -154,17 +154,16 @@ class LivePlotActivity:
         return aa, bb
     @staticmethod
     def _jaccard_series(a: pd.Series, b: pd.Series, mode: str = "union") -> float:
-        """
-        Jaccard entre dos Series booleanas con índices (potencialmente) distintos
-        y/o duplicados. Primero deduplica (OR por timestamp), luego alinea.
-        mode = "union" (faltantes->False) o "intersect".
+        """Jaccard similarity between two boolean Series with possibly different
+        and/or duplicated indices. Series are first deduplicated (OR per timestamp)
+        and then aligned. ``mode`` is "union" (missing -> False) or "intersect".
         """
         if a is None or b is None or a.empty or b.empty:
             return float("nan")
         #a = LivePlotActivity._dedup_bool_series(a)
         #b = LivePlotActivity._dedup_bool_series(b)
         
-        a, b = LivePlotActivity._align_bool_series(a, b, freq="10ms")   # opción 1
+        a, b = LivePlotActivity._align_bool_series(a, b, freq="10ms")   # option 1
         
     
 

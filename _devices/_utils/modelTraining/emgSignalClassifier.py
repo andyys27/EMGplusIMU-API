@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-emg_synthetic_activity_pipeline.py
-----------------------------------
-Genera un dataset sintético de EMG (actividad=1, reposo=0) con variaciones de amplitud
-y entrena una CNN1D binaria. Incluye:
- - Pre-procesamiento (band-pass, notch opcional, z-score por canal)
- - DataLoader con recorte aleatorio de parches entre 0.1 y 1.0 segundos (solo en train)
- - Modelo CNN 1D ligero
- - Métricas ACC, F1, AUROC
- - Guardado de checkpoints y métricas
+"""Synthetic EMG activity dataset generation and CNN training pipeline.
 
-Uso rápido:
+Features:
+ - Pre-processing (band-pass, optional notch, per-channel z-score)
+ - DataLoader with random crops between 0.1 and 1.0 seconds (train only)
+ - Lightweight 1D CNN model
+ - Metrics: accuracy, F1, AUROC
+ - Checkpoint and metric saving
+
+Quick usage::
+
     python emg_synthetic_activity_pipeline.py --epochs 10 --n 3000 --channels 8 --fs 1000
 
-Requisitos:
-    python>=3.9, numpy, scipy, scikit-learn, torch, tqdm
+Requirements: python>=3.9, numpy, scipy, scikit-learn, torch, tqdm
 """
 import os
 import math
@@ -35,27 +33,27 @@ from tqdm import tqdm
 
 
 # ===============================
-# Filtros y normalización
+# Filters and normalization
 # ===============================
 def bandpass(signal: np.ndarray, fs: int, low: float = 20.0, high: float = 450.0, order: int = 4) -> np.ndarray:
-    """Filtro pasabanda por canal (shape esperada: (..., T) en último eje)."""
+    """Per-channel band-pass filter (expected shape (..., T) on last axis)."""
     b, a = butter(order, [low/(fs/2), high/(fs/2)], btype='band')
     return filtfilt(b, a, signal, axis=-1)
 
 def notch(signal: np.ndarray, fs: int, f0: float = 50.0, Q: float = 30.0) -> np.ndarray:
-    """Filtro notch para 50 Hz (o 60 Hz cambiando f0)."""
+    """Notch filter for 50 Hz (use 60 Hz by changing ``f0``)."""
     b, a = iirnotch(f0/(fs/2), Q)
     return filtfilt(b, a, signal, axis=-1)
 
 def zscore_per_channel(x: np.ndarray) -> np.ndarray:
-    """Estandariza por canal: (x - mu) / sd, con sd estabilizado."""
+    """Per-channel standardization: ``(x - mu) / sd`` with stabilized ``sd``."""
     mu = x.mean(axis=-1, keepdims=True)
     sd = x.std(axis=-1, keepdims=True) + 1e-8
     return (x - mu) / sd
 
 
 # ===============================
-# Síntesis de dataset EMG
+# EMG dataset synthesis
 # ===============================
 def synth_emg_activity_dataset(
     n: int = 3000,
@@ -71,31 +69,31 @@ def synth_emg_activity_dataset(
     noise_std_activity: float = 0.08,
     seed: int = 0
 ) -> Tuple[np.ndarray, np.ndarray, int]:
-    """
-    Genera X (N,C,T), y (N,), fs para un problema binario actividad vs reposo.
-    Robustez: variación de amplitud global, jitter por canal, paseos de base (baseline wander),
-    y distintas varianzas de ruido para reposo/actividad.
+    """Generate ``X`` (N,C,T), ``y`` (N,) and sampling rate ``fs`` for a binary
+    activity vs. rest problem. Includes robustness via global amplitude jitter,
+    per-channel jitter, baseline wander and different noise variances for
+    rest/activity.
     """
     rng = np.random.RandomState(seed)
     T = int(base_window_s * fs)
     X = np.zeros((n, C, T), dtype=np.float32)
     y = (rng.rand(n) < p_activity).astype(np.int64)
 
-    # Ganancias por canal (constantes por muestra pero aleatorias entre canales)
-    # Simula electrodos con distinta impedancia/sensibilidad
+    # Per-channel gains (constant per sample but random across channels)
+    # Simulates electrodes with different impedance/sensitivity
     for i in range(n):
-        # Ruido base por clase
+        # Base noise per class
         std_noise = noise_std_activity if y[i] == 1 else noise_std_rest
         xi = rng.randn(C, T).astype(np.float32) * std_noise
 
-        # Paseo de base opcional (baja frecuencia)
+        # Optional low-frequency baseline wander
         if rng.rand() < baseline_wander_prob:
             f0 = rng.uniform(0.2, 0.6)  # Hz
             t = np.arange(T) / fs
             wander = baseline_wander_amp * np.sin(2*np.pi*f0*t).astype(np.float32)
             xi += wander[None, :]
 
-        # Bursts de actividad (si y=1)
+        # Activity bursts (if y == 1)
         if y[i] == 1:
             n_bursts = rng.randint(2, 6)
             for _ in range(n_bursts):
@@ -104,14 +102,14 @@ def synth_emg_activity_dataset(
                 ch = rng.randint(0, C)
                 start = max(0, b_center - b_len//2)
                 end = min(T, b_center + b_len//2)
-                # Pulso ruidoso
+                # Noisy pulse
                 xi[ch, start:end] += rng.randn(end-start).astype(np.float32) * rng.uniform(0.6, 1.0)
 
-        # Jitter de ganancia por canal (multiplicativo, simétrico)
+        # Per-channel gain jitter (multiplicative, symmetric)
         gains = 1.0 + rng.uniform(-channel_gain_jitter, channel_gain_jitter, size=(C, 1)).astype(np.float32)
         xi *= gains
 
-        # Variación de amplitud global por muestra (para robustez a escala)
+        # Global amplitude variation per sample (for scale robustness)
         global_scale = rng.uniform(amp_jitter_range[0], amp_jitter_range[1])
         xi *= global_scale
 
@@ -137,7 +135,7 @@ class EMGBinaryRandomCrop(Dataset):
         self.apply_notch = apply_notch
         self.notch_freq = notch_freq
 
-        # Filtro + normalización por ventana
+        # Per-window filtering and normalization
         Xp = []
         for i in range(X.shape[0]):
             xi = bandpass(X[i], fs)
@@ -209,7 +207,7 @@ class SmallEMG1DCNN(nn.Module):
 
 
 # ===============================
-# Entrenamiento y evaluación
+# Training and evaluation
 # ===============================
 def train_epoch(model, loader, opt, loss_fn, device) -> float:
     model.train()
@@ -248,7 +246,7 @@ def eval_epoch(model, loader, device):
 
 
 # ===============================
-# Utilidades de split y loaders
+# Split utilities and loaders
 # ===============================
 def build_loaders_from_arrays(
     X: np.ndarray, y: np.ndarray, fs: int,
@@ -276,29 +274,31 @@ def build_loaders_from_arrays(
 # Main
 # ===============================
 def main():
-    ap = argparse.ArgumentParser(description="Síntesis EMG y entrenamiento binario actividad vs reposo con recorte aleatorio 0.1–1.0 s.")
-    # Síntesis
-    ap.add_argument("--n", type=int, default=3000, help="Número de ventanas base (muestras).")
-    ap.add_argument("--channels", type=int, default=8, help="Número de canales EMG (C).")
-    ap.add_argument("--fs", type=int, default=1000, help="Frecuencia de muestreo Hz.")
-    ap.add_argument("--win", type=float, default=2.0, help="Duración de ventana base (s).")
-    ap.add_argument("--p_activity", type=float, default=0.5, help="Proporción esperada de actividad (1).")
-    ap.add_argument("--amp_jitter_min", type=float, default=0.8, help="Escala mínima global por muestra.")
-    ap.add_argument("--amp_jitter_max", type=float, default=1.2, help="Escala máxima global por muestra.")
-    ap.add_argument("--chan_gain_jitter", type=float, default=0.15, help="Jitter de ganancia por canal (±frac).")
-    ap.add_argument("--baseline_prob", type=float, default=0.3, help="Prob. de paseo de base.")
-    ap.add_argument("--baseline_amp", type=float, default=0.05, help="Amplitud del paseo de base.")
-    ap.add_argument("--noise_rest", type=float, default=0.05, help="STD del ruido en reposo.")
-    ap.add_argument("--noise_activity", type=float, default=0.08, help="STD del ruido en actividad.")
-    ap.add_argument("--seed", type=int, default=0, help="Semilla de aleatoriedad.")
+    ap = argparse.ArgumentParser(
+        description="Synthetic EMG generation and binary activity training with random crops 0.1–1.0 s."
+    )
+    # Synthesis
+    ap.add_argument("--n", type=int, default=3000, help="Number of base windows (samples).")
+    ap.add_argument("--channels", type=int, default=8, help="Number of EMG channels (C).")
+    ap.add_argument("--fs", type=int, default=1000, help="Sampling frequency in Hz.")
+    ap.add_argument("--win", type=float, default=2.0, help="Base window duration in seconds.")
+    ap.add_argument("--p_activity", type=float, default=0.5, help="Expected proportion of activity (1).")
+    ap.add_argument("--amp_jitter_min", type=float, default=0.8, help="Minimum global scale per sample.")
+    ap.add_argument("--amp_jitter_max", type=float, default=1.2, help="Maximum global scale per sample.")
+    ap.add_argument("--chan_gain_jitter", type=float, default=0.15, help="Per-channel gain jitter (±frac).")
+    ap.add_argument("--baseline_prob", type=float, default=0.3, help="Probability of baseline wander.")
+    ap.add_argument("--baseline_amp", type=float, default=0.05, help="Amplitude of baseline wander.")
+    ap.add_argument("--noise_rest", type=float, default=0.05, help="Noise STD at rest.")
+    ap.add_argument("--noise_activity", type=float, default=0.08, help="Noise STD during activity.")
+    ap.add_argument("--seed", type=int, default=0, help="Random seed.")
 
-    # Entrenamiento
+    # Training
     ap.add_argument("--epochs", type=int, default=15)
     ap.add_argument("--batch", type=int, default=128)
     ap.add_argument("--lr", type=float, default=1e-3)
-    ap.add_argument("--notch", action="store_true", help="Aplicar notch (50 Hz por defecto).")
+    ap.add_argument("--notch", action="store_true", help="Apply notch (50 Hz by default).")
     ap.add_argument("--notch_freq", type=float, default=50.0)
-    ap.add_argument("--pos_weight", type=float, default=0.0, help="Peso para clase positiva en BCE (0=desactivado).")
+    ap.add_argument("--pos_weight", type=float, default=0.0, help="Positive class weight for BCE (0=disabled).")
 
     args = ap.parse_args()
 
@@ -313,20 +313,20 @@ def main():
         seed=args.seed
     )
 
-    # 2) Crear dataloaders con recorte aleatorio (train) y crop/zero-pad a 1 s (val/test)
+    # 2) Create dataloaders with random cropping (train) and crop/zero-pad to 1 s (val/test)
     dl_tr, dl_va, dl_te, in_channels = build_loaders_from_arrays(
         X, y, fs,
         batch_size=args.batch, apply_notch=args.notch, notch_freq=args.notch_freq, seed=args.seed
     )
 
-    # 3) Modelo + optimizador + pérdida
+    # 3) Model, optimizer and loss
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = SmallEMG1DCNN(in_channels=in_channels).to(device)
     pos_weight = torch.tensor([args.pos_weight], dtype=torch.float32, device=device) if args.pos_weight > 0 else None
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    # 4) Entrenar con selección por AUROC en validación
+    # 4) Train with AUROC-based selection on validation
     best = {"auroc": -1.0, "state": None, "epoch": 0}
     for ep in range(1, args.epochs+1):
         tr_loss = train_epoch(model, dl_tr, opt, loss_fn, device)
@@ -335,19 +335,19 @@ def main():
         if va_metrics["auroc"] > best["auroc"]:
             best.update(auroc=va_metrics["auroc"], state=model.state_dict(), epoch=ep)
 
-    # 5) Test con mejor estado
+    # 5) Test with best state
     if best["state"] is not None:
         model.load_state_dict(best["state"])
     te_metrics = eval_epoch(model, dl_te, device)
     print(f"[TEST] acc={te_metrics['acc']:.3f} f1={te_metrics['f1']:.3f} auroc={te_metrics['auroc']:.3f} (best epoch={best['epoch']})")
 
-    # 6) Guardar artefactos
+    # 6) Save artifacts
     os.makedirs("checkpoints", exist_ok=True)
     torch.save(model.state_dict(), "checkpoints/emg_binary_cnn.pt")
     with open("checkpoints/emg_test_metrics.json", "w") as f:
         json.dump(te_metrics, f, indent=2)
 
-    # 7) Exportar también el dataset sintético para reproducibilidad
+    # 7) Optionally export the synthetic dataset for reproducibility
     os.makedirs("data_synth", exist_ok=True)
     np.save("data_synth/X.npy", X)
     np.save("data_synth/y.npy", y)
@@ -355,7 +355,7 @@ def main():
     with open("data_synth/meta.json", "w") as f:
         json.dump(meta, f, indent=2)
 
-    print("✔ Listo. Modelo en ./checkpoints/ y datos en ./data_synth/")
+    print("✔ Done. Model in ./checkpoints/ and data in ./data_synth/")
 
 if __name__ == "__main__":
     main()

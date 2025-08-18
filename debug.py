@@ -1,10 +1,17 @@
 
+"""Demo script for exercising the different devices and live plotting."""
+
 from _devices.MioTracker import MioTracker
 from _devices.GSensor import GSensor
 from _devices.Plotting.LivePlot import LivePlot
 from _devices.FREEEMG import FREEEMG
-from _devices._utils._utilsfn import list_serial_devices,exportCSV
-from _devices.activityDetection.activityDetectors import FixedThresholdDetector, AdaptiveMADDetector, ModelDetector,ModelDetectorONNX
+from _devices._utils._utilsfn import list_serial_devices, exportCSV
+from _devices.activityDetection.activityDetectors import (
+    FixedThresholdDetector,
+    AdaptiveMADDetector,
+    ModelDetector,
+    ModelDetectorONNX,
+)
 from _devices.Plotting.LivePlotActivity import LivePlotActivity
 
 detectorMio =  FixedThresholdDetector(fs=500, window_sec=0.1, threshold=0.00001)
@@ -14,13 +21,12 @@ detectorFree = FixedThresholdDetector(fs=1000, window_sec=0.1, threshold=0.00001
 
 list_serial_devices()
 try:
-    # Crear dispositivo
+    # Create devices
     dev = MioTracker(transport="serial", port="COM7", Fs=500, gain=8)
     fr = FREEEMG()
-    #sg = GSensor(com_port="COM8")
-    
+    # sg = GSensor(com_port="COM8")
 
-    devices = [dev,fr]
+    devices = [dev, fr]
     for device in devices:
         device.connect()
         device.start()
@@ -29,20 +35,17 @@ try:
     
 
     plots = [
-        
-
-        
         {
             "get_df": lambda: dev.get_emg_df(onlyraw=True),
             "title": "MioTracker",
-            "detector": detectorMio, 
+            "detector": detectorMio,
             "overlay": "band",
             "line_y": 0.0,
-        }, 
+        },
         {
             "get_df": lambda: fr.get_emg_df(),
             "title": "Comercial Device",
-            "detector": detectorFree, 
+            "detector": detectorFree,
             "overlay": "band",
             "line_y": 0.0,
         },
@@ -67,6 +70,6 @@ try:
 except Exception as e:
     print(f"Error connecting {e}")
     for device in devices:
-            device.stop()
-            device.disconnect()
+        device.stop()
+        device.disconnect()
 

@@ -64,7 +64,7 @@ class GSensor(Device):
             self.sensor_info = info
         return found
 
-    # --------------------------- Ciclo de vida ---------------------------
+# --------------------------- lifecycle ---------------------------
 
     def connect(self):
         """Establish connection with the sensor."""
@@ -299,7 +299,7 @@ if __name__ == "__main__":
         
         dev.connect()
         dev.start()
-                # Graficar en vivo
+                # Live plotting
         plotter = LivePlot(
             plots=[
                 {"get_df": lambda: dev.get_all_data(), "title": "IMU"},
