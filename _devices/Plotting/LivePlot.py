@@ -82,7 +82,7 @@ class LivePlot:
 
         self.win.closeEvent = _on_close
 
-        # QTimer without widget parent (robusto en PyQt5 también)
+        # QTimer without widget parent (robust in PyQt5 as well)
         self.timer = QtCore.QTimer()
         self.timer.timeout.connect(self._update_once)
         self.timer.start(self.refresh_ms)

@@ -1,22 +1,24 @@
 
+"""Example script that visualizes EMG and IMU streams simultaneously."""
+
 from _devices.MioTracker import MioTracker
 from _devices.GSensor import GSensor
 from _devices.Plotting.LivePlot import LivePlot
 
 
 try:
-        # Crear dispositivo
+    # Create devices
     dev = MioTracker(transport="serial", port="COM7", Fs=1000)
     gs = GSensor(com_port="COM8")
     dev.list_serial_devices()
-        # dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
+    # dev = MioTracker(transport="websocket", websocketuri="ws://miotracker.local/start")
 
     dev.connect()
     gs.connect()
     dev.start()
     gs.start()
 
-        # Graficar en vivo
+    # Live plotting
     plotter = LivePlot(
         plots=[
             {"get_df": lambda: dev.get_all_data(), "title": "EMG"},

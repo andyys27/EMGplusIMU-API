@@ -16,7 +16,7 @@ import pandas as pd
 from .Device import Device
 
 # ──────────────────────────────────────────────────────────────────────
-# Carga de DLLs (.NET) del SDK BTS (ruta relativa a este archivo)
+# Load BTS SDK DLLs relative to this file
 # ──────────────────────────────────────────────────────────────────────
 import clr
 base_path = os.path.dirname(os.path.abspath(__file__))
@@ -50,7 +50,7 @@ class FREEEMG(Device):
         self.attached = False
         self.protocol_applied = False
         self.fs = 1000
-        self.num_channels = 4     # EMG1..EMG8 (ajústalo a tu equipo)
+        self.num_channels = 4     # EMG1..EMG8 (adjust for your hardware)
         self._stop_evt = threading.Event()
         self._reader_thread = None
         self._lock = threading.Lock()
@@ -72,7 +72,7 @@ class FREEEMG(Device):
         
     def _ensure_attached(self):
         if not self.attached:
-            raise RuntimeError("Llama attach() primero.")
+            raise RuntimeError("Call attach() first.")
         
 
     _bat_levels = {
@@ -132,14 +132,14 @@ class FREEEMG(Device):
             print(f"[ERROR] Failed: {e}")
 
 
-    # (Si suscribiste evento)
+    # If an event was subscribed, remove it here if needed
     # if hasattr(self, "_on_sink") and self._on_sink:
     #     self.bio.SinkDataReady -= self._on_sink
     #     self._on_sink = None
     def _reader_loop(self):
-        """
-        Hilo dedicado a vaciar la QueueSink y pasar datos a _emg_rows.
-        Mantén un pequeño sleep para no quemar CPU si no hay datos.
+        """Thread that empties the QueueSink and appends rows to ``_emg_rows``.
+
+        A small sleep prevents burning CPU cycles when no data is available.
         """
         while not self._stop_evt.is_set():
             got = self.read_queue_values()
@@ -161,15 +161,15 @@ class FREEEMG(Device):
         self.attached = False
         self.bio = None
 
-        # Fuerza GC para que Windows suelte el puerto
+        # Force GC so Windows releases the port
         System.GC.Collect()
         System.GC.WaitForPendingFinalizers()
         System.GC.Collect()
         time.sleep(0.3)
     def read_queue_values(self) -> bool:
-        """
-        Lee todos los canales del QueueSink y agrega filas al buffer _emg_rows.
-        Devuelve True si leyó algo, False si no había datos.
+        """Read all channels from the QueueSink and append rows to ``_emg_rows``.
+
+        Returns ``True`` if any data was read, ``False`` otherwise.
         """
         any_data = False
         ch_data = {}  # ch_idx -> list[float]
@@ -194,12 +194,12 @@ class FREEEMG(Device):
         if not any_data:
             return False
 
-        # Reconstrucción por-muestra (filas con todas las columnas EMG)
+        # Reconstruct row-wise samples containing all EMG columns
         if self._last_ts is None:
             self._last_ts = pd.Timestamp.now() + pd.Timedelta(milliseconds=600)
         # Aproxima timestamps centrados en "ahora"
 
-        # Las últimas muestras acaban "ya"; retrocede (max_n-1)/fs
+        # The last samples end "now"; subtract (max_n-1)/fs
         delta = pd.Timedelta(seconds=1.0 / self.fs)
         t0 = self._last_ts 
 
@@ -218,27 +218,28 @@ class FREEEMG(Device):
         with self._lock:
             self._emg_rows.extend(rows)
 
-        # (Opcional) emitir a suscriptores aquí si quieres “live streaming”
+        # Optional: emit to subscribers here for live streaming
         # self._emit_if_ready()
 
         return True
-    def get_emg_df(self,channel = None) -> pd.DataFrame:
-        """
-        Devuelve un DataFrame con las muestras de EMG acumuladas en _emg_rows.
-        Espera filas tipo: {"Timestamp": time.time(), "EMG1": v1, "EMG2": v2, ...}
+    def get_emg_df(self, channel=None) -> pd.DataFrame:
+        """Return a DataFrame with the EMG samples accumulated in ``_emg_rows``.
+
+        Rows are expected as:
+        ``{"Timestamp": time.time(), "EMG1": v1, "EMG2": v2, ...}``
         """
         data_cols = []
         with self._lock:
             if not self._emg_rows:
                 return pd.DataFrame()
-            timestamps = [r["Timestamp"] for r in self._emg_rows]  # lista de segundos UNIX
+            timestamps = [r["Timestamp"] for r in self._emg_rows]  # list of UNIX seconds
             for sview in self.bio.SensorsView.Values:
                 is_connected = getattr(sview, "Connected", False)
                 
                 if is_connected:
                     data_cols.append(f'EMG{sview.Label}')
            
-# Convierte a índice datetime
+# Convert to datetime index
             ts_index = pd.to_datetime(timestamps)
 
 # Construye el DataFrame
@@ -267,7 +268,7 @@ if __name__ == "__main__":
         emg = FREEEMG()
         emg.connect()
 
-        print("EMGSystem ya está inicializado.")
+        print("EMGSystem already initialized.")
 
         sensores_ok = emg.connected_sensors()
         #emg.create_protocol(2)
