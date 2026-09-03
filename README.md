@@ -23,6 +23,54 @@ EMGplusIMU-API provides a unified Python interface for electromyography (EMG) an
 conda env create -f environment.yml --platform win-32
 ```
 
+## Arch Linux Installation
+
+This repository includes helper files and a script to set up the project on Arch Linux.
+
+- Install system packages and Python requirements using the provided script:
+
+```bash
+./scripts/install_arch.sh
+```
+
+- If your user needs permission to access USB serial devices, copy the udev rule and reload udev:
+
+```bash
+sudo cp udev/99-emgplusimu.rules /etc/udev/rules.d/
+sudo udevadm control --reload
+```
+
+Edit `udev/99-emgplusimu.rules` to insert the correct `idVendor`/`idProduct` values for your device.
+
+After running the install script, activate the virtualenv with:
+
+```bash
+source .venv/bin/activate
+```
+
+### Disabling Windows-only drivers
+
+If you want to run this project on Linux or disable the Windows-only drivers
+(`FREEEMG`, `GSensor`) for any reason, set the environment variable
+`EMGPLUSIMU_DISABLE_WINDOWS_MODULES=1` before importing or using the
+`DeviceFactory`. This prevents the package from attempting to import
+`pythonnet`/BTS SDK DLLs on platforms where they are not available.
+
+Examples:
+
+```bash
+# Temporarily disable Windows-only drivers for the current shell session
+export EMGPLUSIMU_DISABLE_WINDOWS_MODULES=1
+python -c "from DeviceFactory import DeviceFactory; print('Available: miotracker'); DeviceFactory.create('miotracker')"
+
+# Run a script with the variable disabled inline
+EMGPLUSIMU_DISABLE_WINDOWS_MODULES=1 python scripts/my_run_script.py
+```
+
+When the variable is set, attempting to create a device that depends on the
+Windows-only SDK will raise a `RuntimeError` with an explanatory message.
+
+
 2. Activate the Environment
 ```bash
 conda activate {name}

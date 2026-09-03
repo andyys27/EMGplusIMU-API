@@ -1,0 +1,9 @@
+# Example udev rule for EMGplusIMU USB devices
+# Replace ATTRS{idVendor} and ATTRS{idProduct} with your device values
+# Copy this file to /etc/udev/rules.d/ and reload udev (see README or scripts/install_arch.sh)
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="vvvv", ATTRS{idProduct}=="pppp", MODE:="0666", GROUP:="plugdev"
+
+# Generic rule matching USB CDC ACM / serial devices (useful if VID/PID unknown)
+KERNEL=="ttyACM*", MODE:="0666", GROUP:="plugdev"
+KERNEL=="ttyUSB*", MODE:="0666", GROUP:="plugdev"

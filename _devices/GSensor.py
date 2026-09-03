@@ -1,6 +1,11 @@
 """Driver for the BTS GSensor inertial device."""
 
-import clr
+try:
+    import clr
+    _HAS_CLR = True
+except Exception:
+    clr = None
+    _HAS_CLR = False
 import time
 import matplotlib.pyplot as plt
 import queue
@@ -18,15 +23,21 @@ from ._utils._utilsfn import list_serial_devices
 # 1) Load your BTS SDK DLL (adjust path if needed)
 base_path = os.path.dirname(os.path.abspath(__file__))
 dll_path = os.path.join(base_path, "dll", "Core.dll")
-clr.AddReference(dll_path)
-
-
-# 2) Import the types we need
-from BTS.GS2.Core import (
-    Supervisor, LogLevel,
-    QueueType, DeviceState,
-    AccelRange, GyroRange,SensorType
-)
+if _HAS_CLR:
+    clr.AddReference(dll_path)
+    from BTS.GS2.Core import (
+        Supervisor, LogLevel,
+        QueueType, DeviceState,
+        AccelRange, GyroRange, SensorType
+    )
+else:
+    Supervisor = None
+    LogLevel = None
+    QueueType = None
+    DeviceState = None
+    AccelRange = None
+    GyroRange = None
+    SensorType = None
 
 
 
@@ -36,6 +47,8 @@ class GSensor(Device):
 
     def __init__(self, com_port) -> None:
         """Discover and prepare the sensor connected to ``com_port``."""
+        if Supervisor is None:
+            raise RuntimeError("BTS GSensor driver requires pythonnet and the BTS SDK (Windows). Not available on this platform.")
         # 1) Create & configure the Supervisor
         self.manager = Supervisor()
         self.manager.SetLoggerState(True)

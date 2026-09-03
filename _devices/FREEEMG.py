@@ -1,11 +1,19 @@
 from __future__ import annotations
 import os
-import clr
+try:
+    import clr
+    _HAS_CLR = True
+except Exception:
+    clr = None
+    _HAS_CLR = False
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-import System, time
-from System import Int64, Single,Array
+try:
+    import System
+    from System import Int64, Single, Array
+except Exception:
+    System = None
 from enum import IntEnum
 import os
 import time
@@ -16,13 +24,10 @@ import pandas as pd
 from .Device import Device
 
 # ──────────────────────────────────────────────────────────────────────
-# Load BTS SDK DLLs relative to this file
+# Load BTS SDK DLLs relative to this file (only available when pythonnet is installed)
 # ──────────────────────────────────────────────────────────────────────
-import clr
 base_path = os.path.dirname(os.path.abspath(__file__))
-DLL_DIR  = os.path.join(base_path, "dll")
-
-
+DLL_DIR = os.path.join(base_path, "dll")
 
 dlls = [
     "bts.biodaq.core.dll",
@@ -31,20 +36,25 @@ dlls = [
     "Core.dll",
 ]
 
-    
-for name in dlls:
-    #print(os.path.join(DLL_DIR, name))
-    clr.AddReference(os.path.join(DLL_DIR, name))
+if _HAS_CLR:
+    for name in dlls:
+        clr.AddReference(os.path.join(DLL_DIR, name))
 
-from BTS.BioDAQ.Core import (
-    BioDAQ, BioDAQExitStatus,
-    Protocol, ProtocolItem, ChannelType,
-    TriggerSource, DiskSink, TrialReader, TDFExporter, FileFormat,ProtocolItemState,QueueSink,SinkExitStatus
-)
+    from BTS.BioDAQ.Core import (
+        BioDAQ, BioDAQExitStatus,
+        Protocol, ProtocolItem, ChannelType,
+        TriggerSource, DiskSink, TrialReader, TDFExporter, FileFormat, ProtocolItemState, QueueSink, SinkExitStatus
+    )
+else:
+    BioDAQ = None
+    BioDAQExitStatus = None
+    QueueSink = None
 
 class FREEEMG(Device):
     def __init__(self) -> None:
         super().__init__()
+        if BioDAQ is None:
+            raise RuntimeError("FREEEMG driver requires pythonnet and the BTS SDK (Windows). Not available on this platform.")
         self.bio = BioDAQ()
         self.disk_sink = None
         self.attached = False
