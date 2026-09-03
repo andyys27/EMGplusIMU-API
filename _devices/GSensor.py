@@ -39,9 +39,6 @@ else:
     GyroRange = None
     SensorType = None
 
-
-
-
 class GSensor(Device):
     """BTS GSensor device compatible with the generic :class:`Device` API."""
 
@@ -129,8 +126,6 @@ class GSensor(Device):
             self.connected = not ok
             self.network = None
             self.sensor = None
-
-
 
     def _configure(self, freq_hz: int = 100):
         """Enable accel/gyro/mag/quat, set ranges & frequency exactly as in the SDK."""

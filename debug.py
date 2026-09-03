@@ -17,8 +17,6 @@ from _devices.Plotting.LivePlotActivity import LivePlotActivity
 detectorMio =  FixedThresholdDetector(fs=500, window_sec=0.1, threshold=0.00001)
 detectorFree = FixedThresholdDetector(fs=1000, window_sec=0.1, threshold=0.000015)
 
-
-
 list_serial_devices()
 try:
     # Create devices
@@ -31,9 +29,6 @@ try:
         device.connect()
         device.start()
     
-
-    
-
     plots = [
         {
             "get_df": lambda: dev.get_emg_df(onlyraw=True),
