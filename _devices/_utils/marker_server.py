@@ -32,7 +32,6 @@ Uso
     ...
     srv.stop()
 
-Prueba rápida:  python -m _devices._utils.marker_server
 """
 
 from __future__ import annotations
