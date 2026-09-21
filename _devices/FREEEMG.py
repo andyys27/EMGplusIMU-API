@@ -1,73 +1,83 @@
+"""Driver BTS FREEEMG (BioDAQ SDK) con timestamps sincronizados.
+
+Cambios principales respecto a la versión anterior
+--------------------------------------------------
+* Se leen TODOS los canales (antes ``range(n-1)`` omitía el último).
+* Timestamps derivados de ``DeviceClock`` (índice de muestra -> reloj común
+  con estimación de Fs real y deriva) en vez de ``now + 600 ms`` sintético.
+* Buffer acotado (``deque``) y almacenamiento por bloques numpy (rápido).
+* ``stop()`` idempotente y drena la cola; ``disconnect()`` seguro.
+* ``get_emg_df(since=...)`` permite lecturas incrementales (grabación).
+* Constructor con ``num_channels`` configurable.
+"""
+
 from __future__ import annotations
+
 import os
+import threading
+import time
+from collections import deque
+from typing import Dict, List, Optional
+
+import numpy as np
+import pandas as pd
+
+from .Device import Device
+from ._utils.clock import DeviceClock, HostClock
+
 try:
     import clr
     _HAS_CLR = True
 except Exception:
     clr = None
     _HAS_CLR = False
-import time
-import numpy as np
-import matplotlib.pyplot as plt
+
 try:
     import System
-    from System import Int64, Single, Array
 except Exception:
     System = None
-from enum import IntEnum
-import os
-import time
-import threading
-from typing import Optional, List, Dict
-import pandas as pd
 
-from .Device import Device
-
-# ──────────────────────────────────────────────────────────────────────
-# Load BTS SDK DLLs relative to this file (only available when pythonnet is installed)
-# ──────────────────────────────────────────────────────────────────────
-base_path = os.path.dirname(os.path.abspath(__file__))
-DLL_DIR = os.path.join(base_path, "dll")
-
-dlls = [
-    "bts.biodaq.core.dll",
-    "FTD2XX_NET.dll",
-    "log4net.dll",
-    "Core.dll",
-]
+DLL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dll")
+_DLLS = ["bts.biodaq.core.dll", "FTD2XX_NET.dll", "log4net.dll", "Core.dll"]
 
 if _HAS_CLR:
-    for name in dlls:
-        clr.AddReference(os.path.join(DLL_DIR, name))
-
-    from BTS.BioDAQ.Core import (
-        BioDAQ, BioDAQExitStatus,
-        Protocol, ProtocolItem, ChannelType,
-        TriggerSource, DiskSink, TrialReader, TDFExporter, FileFormat, ProtocolItemState, QueueSink, SinkExitStatus
-    )
+    for _n in _DLLS:
+        clr.AddReference(os.path.join(DLL_DIR, _n))
+    from BTS.BioDAQ.Core import BioDAQ, BioDAQExitStatus, TriggerSource, QueueSink
 else:
-    BioDAQ = None
-    BioDAQExitStatus = None
-    QueueSink = None
+    BioDAQ = BioDAQExitStatus = TriggerSource = QueueSink = None
+
 
 class FREEEMG(Device):
-    def __init__(self) -> None:
+    _BAT = {0: "0% (Empty)", 1: "25% (Low)", 2: "50% (Medium)",
+            3: "75% (High)", 4: "100% (Full)"}
+
+    def __init__(self, num_channels: int = 4, fs: int = 1000,
+                 buffer_sec: float = 60.0) -> None:
         super().__init__()
         if BioDAQ is None:
-            raise RuntimeError("FREEEMG driver requires pythonnet and the BTS SDK (Windows). Not available on this platform.")
+            raise RuntimeError("FREEEMG requiere pythonnet + SDK BTS (Windows).")
         self.bio = BioDAQ()
-        self.disk_sink = None
+        self.qs = None
         self.attached = False
-        self.protocol_applied = False
-        self.fs = 1000
-        self.num_channels = 4     # EMG1..EMG8 (adjust for your hardware)
-        self._stop_evt = threading.Event()
-        self._reader_thread = None
-        self._lock = threading.Lock()
-        self._emg_rows: list[dict] = [] 
-        self._last_ts = None
+        self.fs = fs
+        self.num_channels = num_channels
+        self.clock = DeviceClock(fs=fs)
+        self.channel_names: List[str] = [f"EMG{i + 1}" for i in range(num_channels)]
 
-    def connect(self):
+        self._stop_evt = threading.Event()
+        self._reader_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+        # Cada elemento: (idx_inicial, ndarray (n, num_channels))
+        self._chunks: deque = deque()
+        self._max_samples = int(buffer_sec * fs)
+        self._n_buffered = 0
+        self._next_idx = 0                       # contador global de muestras
+        self._pending: Dict[int, List[float]] = {c: [] for c in range(num_channels)}
+        self.dropped_reads = 0
+
+    # ------------------------------------------------------------ lifecycle
+    def connect(self) -> bool:
         st = self.bio.Attach()
         if st != BioDAQExitStatus.Success:
             raise RuntimeError(f"Attach failed: {st} ({int(st)})")
@@ -77,220 +87,182 @@ class FREEEMG(Device):
         self.qs.Init()
         self.bio.Sinks.Add(self.qs)
         self.connected_sensors()
-        self.fs = 1000
+        self._connected = True
         return True
-        
-    def _ensure_attached(self):
-        if not self.attached:
-            raise RuntimeError("Call attach() first.")
-        
 
-    _bat_levels = {
-        0:  "0% (Empty)",
-        1:    "25% (Low)",
-        2: "50% (Medium)",
-        3:   "75% (High)",
-        4:   "100% (Full)",
-    }
-    def connected_sensors(self):
-            self._ensure_attached()
-            self.bio.UpdateStatusInfo()
-            connected = []
+    def _ensure_attached(self) -> None:
+        if not self.attached or self.bio is None:
+            raise RuntimeError("Llama a connect() primero.")
 
-            for sview in self.bio.SensorsView.Values:
-                label = getattr(sview, "Label", None) or getattr(sview, "SensorLabel", None) or "?"
-                is_connected = getattr(sview, "Connected", False)
-                batteryLevel = getattr(sview, "BattLevel", False)
-            
-                
-                print(f"Sensor {label}: {'✅ Conectado, Battery ' + str(self._bat_levels[batteryLevel.value__]) if is_connected else '❌ Desconectado'}")
-                if is_connected:
-                    connected.append(label)
+    def connected_sensors(self) -> List[str]:
+        """Imprime estado/batería y devuelve las etiquetas conectadas.
 
-            return connected
-    
-    def start(self):
-        
+        Además fija ``channel_names`` según el orden de SensorsView.
+        NOTA: se asume que el índice de canal del QueueSink coincide con el
+        orden de ``SensorsView.Values``; verifícalo con tu hardware.
+        """
+        self._ensure_attached()
+        self.bio.UpdateStatusInfo()
+        connected, names = [], []
+        for i, sv in enumerate(self.bio.SensorsView.Values):
+            label = getattr(sv, "Label", None) or getattr(sv, "SensorLabel", None) or str(i + 1)
+            ok = bool(getattr(sv, "Connected", False))
+            batt = getattr(sv, "BattLevel", None)
+            try:
+                batt_txt = self._BAT.get(batt.value__, "?")
+            except Exception:
+                batt_txt = "?"
+            print(f"[FREEEMG] Sensor {label}: "
+                  f"{'conectado, batería ' + batt_txt if ok else 'DESCONECTADO'}")
+            names.append(f"EMG{label}")
+            if ok:
+                connected.append(label)
+        if names:
+            self.num_channels = max(self.num_channels, len(names)) if len(names) < self.num_channels else len(names)
+            self.channel_names = names
+            for c in range(self.num_channels):
+                self._pending.setdefault(c, [])
+        return connected
+
+    def start(self) -> None:
+        self._ensure_attached()
+        if self._started:
+            return
         self.bio.Trigger(TriggerSource.Software)
-        st = self.bio.Arm()
-        if st != BioDAQExitStatus.Success:
-            raise RuntimeError(f"Arm failed: {st}")
-
-        st = self.bio.Start()
-        if st != BioDAQExitStatus.Success:
-            raise RuntimeError(f"Start failed: {st}")
-                # Lanzar hilo lector
+        for name, fn in (("Arm", self.bio.Arm), ("Start", self.bio.Start)):
+            st = fn()
+            if st != BioDAQExitStatus.Success:
+                raise RuntimeError(f"{name} failed: {st}")
         self._stop_evt.clear()
-        self._reader_thread = threading.Thread(target=self._reader_loop, name="FEMGReader", daemon=True)
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop, name="FEMGReader", daemon=True)
         self._reader_thread.start()
         self._started = True
 
-    def stop(self,out_dir="."):
-        """
-        Stops acquisition, saves to CSV with default name, and cleans up BioDAQ.
-        """
+    def stop(self) -> None:
+        if not self._started:
+            return
+        self._stop_evt.set()
+        if self._reader_thread and self._reader_thread.is_alive():
+            self._reader_thread.join(timeout=1.0)
+        self._reader_thread = None
         try:
-            st = self.bio.Stop()   
-            if not self._started:
-                return
-            self._stop_evt.set()
-            if self._reader_thread and self._reader_thread.is_alive():
-                self._reader_thread.join(timeout=1.0)
-            self._reader_thread = None 
-            self._started = False
+            self.bio.Stop()
         except Exception as e:
-            print(f"[ERROR] Failed: {e}")
+            print(f"[FREEEMG] Stop error: {e}")
+        try:
+            self.read_queue_values()      # drena lo que quedó en la cola
+        except Exception:
+            pass
+        self._started = False
 
-
-    # If an event was subscribed, remove it here if needed
-    # if hasattr(self, "_on_sink") and self._on_sink:
-    #     self.bio.SinkDataReady -= self._on_sink
-    #     self._on_sink = None
-    def _reader_loop(self):
-        """Thread that empties the QueueSink and appends rows to ``_emg_rows``.
-
-        A small sleep prevents burning CPU cycles when no data is available.
-        """
-        while not self._stop_evt.is_set():
-            got = self.read_queue_values()
-            if not got:
-                time.sleep((1.0 / self.fs)  * 2 )
-
-
-
-    def disconnect(self):
-        try: self.bio.Stop()
-        except: pass
-        try: self.bio.Sinks.Clear()
-        except: pass
-        try: self.bio.Reset()
-        except: pass
-        try: self.bio.Dispose()
-        except: pass
-
+    def disconnect(self) -> None:
+        self.stop()
+        if self.bio is not None:
+            for fn in (self.bio.Sinks.Clear, self.bio.Reset, self.bio.Dispose):
+                try:
+                    fn()
+                except Exception:
+                    pass
         self.attached = False
+        self._connected = False
         self.bio = None
-
-        # Force GC so Windows releases the port
-        System.GC.Collect()
-        System.GC.WaitForPendingFinalizers()
-        System.GC.Collect()
+        if System is not None:
+            System.GC.Collect()
+            System.GC.WaitForPendingFinalizers()
+            System.GC.Collect()
         time.sleep(0.3)
+
+    # --------------------------------------------------------------- reader
+    def _reader_loop(self) -> None:
+        idle = 1.0 / self.fs * 2
+        while not self._stop_evt.is_set():
+            try:
+                got = self.read_queue_values()
+            except Exception as e:
+                print(f"[FREEEMG] reader error: {e}")
+                self.dropped_reads += 1
+                got = False
+            if not got:
+                time.sleep(idle)
+
     def read_queue_values(self) -> bool:
-        """Read all channels from the QueueSink and append rows to ``_emg_rows``.
-
-        Returns ``True`` if any data was read, ``False`` otherwise.
-        """
+        """Vacía el QueueSink y agrega bloques alineados por muestra."""
+        if self.qs is None:
+            return False
         any_data = False
-        ch_data = {}  # ch_idx -> list[float]
-
-        # Lee por canal
-
-
-        for ch_idx in range(0,self.num_channels-1):
-            qsz = self.qs.QueueSize(int(ch_idx))
-            if qsz <= 0:
+        for ch in range(self.num_channels):          # <- TODOS los canales
+            if self.qs.QueueSize(int(ch)) <= 0:
                 continue
-
-            #values = Array.CreateInstance(Single, 0)
-            status, values = self.qs.ReadDataBufferByChannel(ch_idx)
+            _status, values = self.qs.ReadDataBufferByChannel(ch)
             if values is None:
-                # print(f"[WARN] Canal {ch_idx} status: {status}")
                 continue
-
-            ch_data[ch_idx] = [float(v) for v in values]
-            any_data = any_data or len(ch_data[ch_idx]) > 0
-
+            arr = [float(v) for v in values]
+            if arr:
+                self._pending[ch].extend(arr)
+                any_data = True
         if not any_data:
             return False
 
-        # Reconstruct row-wise samples containing all EMG columns
-        if self._last_ts is None:
-            self._last_ts = pd.Timestamp.now() + pd.Timedelta(milliseconds=600)
-        # Aproxima timestamps centrados en "ahora"
+        # Solo se emiten muestras presentes en TODOS los canales que transmiten
+        active = [c for c in range(self.num_channels) if self._pending[c] or True]
+        n = min(len(self._pending[c]) for c in active)
+        if n == 0:
+            return True
+        block = np.empty((n, self.num_channels), dtype=np.float64)
+        for c in active:
+            block[:, c] = self._pending[c][:n]
+            del self._pending[c][:n]
 
-        # The last samples end "now"; subtract (max_n-1)/fs
-        delta = pd.Timedelta(seconds=1.0 / self.fs)
-        t0 = self._last_ts 
-
-        rows = []
-        max_n = max(len(v) for v in ch_data.values())
-        for i in range(max_n):
-            ts = t0 + i * delta
-            row = {"Timestamp": ts}
-            for ch_idx in range(0, self.num_channels):
-                if ch_idx in ch_data and i < len(ch_data[ch_idx]):
-                    row[f"EMG{ch_idx+1}"] = ch_data[ch_idx][i]
-                # else: si faltan muestras en ese canal, se omite la columna en esta fila
-                
-            rows.append(row)
-            self._last_ts = rows[-1]["Timestamp"]
         with self._lock:
-            self._emg_rows.extend(rows)
-
-        # Optional: emit to subscribers here for live streaming
-        # self._emit_if_ready()
-
+            start = self._next_idx
+            self._chunks.append((start, block))
+            self._next_idx += n
+            self._n_buffered += n
+            while self._n_buffered > self._max_samples and len(self._chunks) > 1:
+                _, old = self._chunks.popleft()
+                self._n_buffered -= len(old)
+        self.clock.observe(self._next_idx - 1)        # llegada de la última muestra
         return True
-    def get_emg_df(self, channel=None) -> pd.DataFrame:
-        """Return a DataFrame with the EMG samples accumulated in ``_emg_rows``.
 
-        Rows are expected as:
-        ``{"Timestamp": time.time(), "EMG1": v1, "EMG2": v2, ...}``
-        """
-        data_cols = []
+    # ----------------------------------------------------------------- data
+    def get_emg_df(self, channel: Optional[str] = None,
+                   since: Optional[pd.Timestamp] = None) -> pd.DataFrame:
+        """DataFrame con DatetimeIndex (reloj común). ``since`` = solo filas nuevas."""
         with self._lock:
-            if not self._emg_rows:
+            if not self._chunks:
                 return pd.DataFrame()
-            timestamps = [r["Timestamp"] for r in self._emg_rows]  # list of UNIX seconds
-            for sview in self.bio.SensorsView.Values:
-                is_connected = getattr(sview, "Connected", False)
-                
-                if is_connected:
-                    data_cols.append(f'EMG{sview.Label}')
-           
-# Convert to datetime index
-            ts_index = pd.to_datetime(timestamps)
-
-# Construye el DataFrame
-            df = pd.DataFrame(
-                [[row.get(col, None) for col in data_cols] for row in self._emg_rows],
-                index=pd.DatetimeIndex(ts_index, name="Timestamp"),
-                columns=data_cols
-            )
-
-            df = df.sort_index().infer_objects()   
-            df.dropna()         
-            if channel is None:
-                return df
-            else:
-                try:
-                    return df[[channel]]
-                except KeyError:
-                    return df
+            starts = [s for s, _ in self._chunks]
+            data = np.vstack([b for _, b in self._chunks])
+            idx = np.concatenate([np.arange(s, s + len(b)) for s, b in self._chunks])
+        ts = self.clock.index_to_datetime(idx)        # timestamps refinados retroactivamente
+        df = pd.DataFrame(data, index=ts, columns=self.channel_names[: data.shape[1]])
+        if since is not None:
+            df = df[df.index > since]
+        if channel is not None and channel in df.columns:
+            return df[[channel]]
+        return df
 
     def get_imu_df(self) -> pd.DataFrame:
-
         return pd.DataFrame()
-    
+
+    def sync_report(self) -> dict:
+        return {"fs_nominal": self.clock.fs_nominal,
+                "fs_estimated": round(self.clock.fs_estimated, 4),
+                "drift_ppm": round(self.clock.drift_ppm, 1),
+                "samples": self._next_idx,
+                "dropped_reads": self.dropped_reads}
+
+
 if __name__ == "__main__":
+    emg = None
     try:
-        emg = FREEEMG()
+        emg = FREEEMG(num_channels=4)
         emg.connect()
-
-        print("EMGSystem already initialized.")
-
-        sensores_ok = emg.connected_sensors()
-        #emg.create_protocol(2)
         emg.start()
-
-        time.sleep(2)  # Espera un poco para que se adquieran datos
-        emg.print_queue_values()  # Imprime los valores adquiridos
-
-        emg.stop()
-        #emg.set_protocol()
-        emg.disconnect()
-    
-    except Exception as e:
-        print("Error:", e)
-        emg.disconnect()
+        time.sleep(5)
+        print(emg.get_emg_df().tail())
+        print(emg.sync_report())
+    finally:
+        if emg is not None:
+            emg.disconnect()
