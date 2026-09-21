@@ -303,7 +303,7 @@ if __name__ == "__main__":
     # 1) Serial
 
     try:
-        dev = GSensor(com_port="COM8")
+        dev = GSensor(com_port="COM4")
         
         dev.connect()
         dev.start()
