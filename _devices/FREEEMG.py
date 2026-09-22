@@ -53,7 +53,7 @@ class FREEEMG(Device):
             3: "75% (High)", 4: "100% (Full)"}
 
     def __init__(self, num_channels: int = 4, fs: int = 1000,
-                 buffer_sec: float = 60.0) -> None:
+                 buffer_sec: Optional[float] = None) -> None:
         super().__init__()
         if BioDAQ is None:
             raise RuntimeError("FREEEMG requiere pythonnet + SDK BTS (Windows).")
@@ -70,7 +70,7 @@ class FREEEMG(Device):
         self._lock = threading.Lock()
         # Cada elemento: (idx_inicial, ndarray (n, num_channels))
         self._chunks: deque = deque()
-        self._max_samples = int(buffer_sec * fs)
+        self._max_samples = None if buffer_sec is None else int(buffer_sec * fs)
         self._n_buffered = 0
         self._next_idx = 0                       # contador global de muestras
         self._pending: Dict[int, List[float]] = {c: [] for c in range(num_channels)}
@@ -219,9 +219,10 @@ class FREEEMG(Device):
             self._chunks.append((start, block))
             self._next_idx += n
             self._n_buffered += n
-            while self._n_buffered > self._max_samples and len(self._chunks) > 1:
-                _, old = self._chunks.popleft()
-                self._n_buffered -= len(old)
+            if self._max_samples is not None:
+                while self._n_buffered > self._max_samples and len(self._chunks) > 1:
+                    _, old = self._chunks.popleft()
+                    self._n_buffered -= len(old)
         self.clock.observe(self._next_idx - 1)        # llegada de la última muestra
         return True
 
