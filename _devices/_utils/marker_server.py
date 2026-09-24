@@ -51,7 +51,7 @@ COLUMNS = ["Timestamp", "t_ns", "source", "t_rx_ns", "t_unity_ns",
 
 
 class UnityMarkerServer:
-    def __init__(self, out_path: str, host: str = "0.0.0.0", port: int = 5005,
+    def __init__(self, out_path: str, host: str = "10.43.42.208", port: int = 5005,
                  recorder: Optional[object] = None, verbose: bool = True) -> None:
         self.out_path = out_path
         self.host = host
@@ -121,8 +121,10 @@ class UnityMarkerServer:
                 print(f"[UnityMarkers] paquete ignorado: {e!r}")
 
     def _handle(self, data: bytes, addr, t2: int) -> None:
+        print(f"[UnityMarkers] raw: {data!r}")
         parts = data.decode("utf-8", "replace").rstrip("\r\n").split("\t")
         kind = parts[0]
+        print(f"[UnityMarkers] kind={kind} parts={parts}")
 
         if kind == "PING" and len(parts) >= 3:
             t3 = HostClock.now_ns()
