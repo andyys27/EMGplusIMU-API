@@ -1,0 +1,16 @@
+{
+  "name": "sesion01",
+  "ended": "2026-09-28 19:13:37.392916100",
+  "devices": {
+    "free": {
+      "fs_nominal": 1000.0,
+      "fs_estimated": 999.9623,
+      "drift_ppm": -37.7,
+      "samples": 266092,
+      "dropped_reads": 0
+    },
+    "gs": {
+      "class": "GSensor"
+    }
+  }
+}
